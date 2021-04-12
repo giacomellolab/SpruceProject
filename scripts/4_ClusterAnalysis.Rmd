@@ -1,0 +1,113 @@
+---
+title: "Cluster Analysis, after Normalisation"
+author: "Yuvarani Masarapu"
+date: "4/9/2021"
+output: html_document
+---
+
+```{r global-options, include=FALSE}
+knitr::opts_chunk$set(fig.path='figs/', fig.width=14, fig.height=10, warning=FALSE, message=FALSE, echo = FALSE)
+```
+
+```{r libraries-load, echo=FALSE}
+suppressPackageStartupMessages({
+  library(STutility)
+  library(Seurat)
+  library(harmony)
+  library(gridExtra)
+  library(pals)
+  library(akima)
+  library(readr)
+  library(plotly)
+  library(tibble)
+  library(raster)
+  library(dplyr)
+  library(stringr)
+  library(magrittr)
+  library(ggplot2)
+  library(imager)
+  library(Matrix)
+  library(cowplot)
+  require(data.table)
+  library(magick)
+  library(grid)
+  library(SeuratObject)
+})
+```
+
+## Next steps in downstream analysis (after normalisation and SCT integration)
+
+*PCA, Harmony, UMAP learning, FindNeighbours and FindClusters*
+
+ -Dimensions = 28
+    Selected 28 instead of the initial 50 dimensions (that       were used in Alina's pipeline) after careful observation of PCA scores of all 50 contributing dimensions using heatmaps and elbowplots; then selected the ones which good pca scores
+    
+ -Resolution = 1.15 (same as in Alina's pipeline)
+
+OBS! Make sure to save objects at each step, helps save a lot of time if the steps need to be redone (for example, if we need multiple steps to tweak parameters for getting the right/desired number of clusters)
+
+```{r echo=FALSE}
+spruce.merged <- readRDS("~/Documents/23-02-2021_spruce_new/spruce_merged_obj_19-03-2021.rds")
+
+#PCA
+spruce.merged.PCA <- RunPCA(object = spruce.merged, assay = "SCT", features = spruce.features) 
+saveRDS(spruce.merged.PCA, file = "spruce_merged_PCA.rds")
+
+#Batch correction using harmony()
+spruce.merged.PCA.harmony <- RunHarmony(spruce.merged.PCA, group.by.vars ="array_id",theta = 2, plot_convergence = F, assay.use = "SCT", reduction = "pca", dims.use = 1:28, verbose = F) 
+saveRDS(spruce.merged.PCA.harmony, file = "spruce_merged_PCA_harmony.rds")
+
+#UMAP learning
+spruce.merged.PCA.harmony <- RunUMAP( object = spruce.merged.PCA.harmony, dims = 1:28, assay = "SCT", reduction = "harmony")
+saveRDS(spruce.merged.PCA.harmony, file = "spruce_merged_PCA_harmony_Umap.rds")
+ 
+spruce.merged.PCA.harmony <- FindNeighbors(object = spruce.merged.PCA.harmony, assay = "SCT" ,reduction = "harmony", k.param = 23, dims = 1:28)
+saveRDS(spruce.merged.PCA.harmony, file = "spruce_merged_PCA_harmony_Umap_FindNeigh.rds")
+  
+spruce.merged.PCA.harmony <- FindClusters(object = spruce.merged.PCA.harmony, pc.use = 1:28, resolution = 1.15, save.SNN = T, do.sparse = T)
+saveRDS(spruce.merged.PCA.harmony, file = "spruce_merged_PCA_harmony_Umap_FindNeigh_findClusters.rds")
+```
+
+## Prep before visualisation
+
+1. The integration step from (2_Normalisation_filteredData.Rmd) requires us to reload the images into the seurat object
+
+```{r echo=FALSE}
+#<spruce.merged.PCA.harmony@tools$Staffli@imgs = imgs>; done if image paths are different for the object or the object is moved from server to local otherwise below step works just fine
+spruce.merged.PCA.harmony <- LoadImages(spruce.merged.PCA.harmony, time.resolve = F, verbose = F)
+```
+
+2. Custom color palettes for the spruce clusters, can be changed later
+
+```{r echo=FALSE}
+spruce.fill <- readRDS("~/Documents/23-02-2021_spruce_new/new_analysis_local/figs_28dims/clustering_set3/spruce.fill.rds")
+
+library(RColorBrewer)
+n <- 60
+qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
+
+col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
+```
+
+
+## Visualisation of clusters and batch corrected, filtered, normalised data
+
+1. Visualising clusters, verifying if batch correction is achieved successfully from harmony; kind of sanity check
+
+Cluster colors in UMAP dimensions
+
+```{r echo=FALSE}
+DimPlot(object = spruce.merged.PCA.harmony, reduction = "umap", cols = col_vector)
+```
+
+Clusters grouped by 'slides'
+
+```{r echo=FALSE}
+DimPlot(object = spruce.merged.PCA.harmony, reduction = "umap", group.by = "slide_id", cols = col_vector)
+```
+
+Clusters grouped by 'sub arrays'
+
+```{r echo=FALSE}
+DimPlot(object = spruce.merged.PCA.harmony, reduction = "umap", group.by = "array_id", cols = spruce.fill$x)
+```
