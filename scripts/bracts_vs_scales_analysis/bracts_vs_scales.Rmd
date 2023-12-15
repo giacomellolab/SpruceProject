@@ -1,0 +1,323 @@
+---
+title: "Targeted analysis (selected spots for Bracts and Scales)"
+author: "Yuvarani Masarapu"
+date: "5/10/2021"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+```{r global-options, include=FALSE}
+knitr::opts_chunk$set(fig.path='figs/', fig.width=16, fig.height=12, warning=FALSE, message=FALSE)
+```
+
+```{r libraries-load, echo=FALSE}
+suppressPackageStartupMessages({
+  library(STutility)
+  library(Seurat)
+  library(harmony)
+  library(gridExtra)
+  library(pals)
+  library(akima)
+  library(readr)
+  library(plotly)
+  library(tibble)
+  library(raster)
+  library(dplyr)
+  library(stringr)
+  library(magrittr)
+  library(ggplot2)
+  library(imager)
+  library(Matrix)
+  library(cowplot)
+  require(data.table)
+  library(magick)
+  library(grid)
+  library(SeuratObject)
+  library(VennDiagram)
+})
+```
+
+### Convert loupe files (.json) to the right spotfiles (with correct spot coordinates in .tsv format)
+```{r eval=FALSE}
+jsfiles <- list.files(path = paste(indir, "/06-05-21_targeted_analysis/spotfiles", sep = ""), pattern = ".json", full.names = T, recursive = T)
+selection_file <- list()
+
+for (jsonfiles in jsfiles){
+  js <- jsonlite::read_json(jsonfiles)
+  df <- do.call(plyr::rbind.fill, sapply(js$oligo, function(ls) {
+   data.frame(ls)
+  }))
+  selection_file <- data.frame(x = df$col, y = df$row,
+                             x_new = df$col, y_new = df$row,
+                             pixel_x = df$imageX, pixel_y = df$imageY, 
+                             selection = ifelse(!is.na(df$tissue), 1, 0))
+  write.table(x = selection_file, file = jsonfiles, row.names = F, col.names = T, quote = F, sep = "\t")
+}
+
+#Files are converted to spot coordinates but still in .json format so changing them to .tsv for compatibility
+old.filenames <- list.files(path = paste(indir, "/06-05-21_targeted_analysis/spotfiles", sep = ""), full.names = T, recursive = T, pattern = "*.json")
+new.filenames <- gsub(".json$", ".tsv", old.filenames)
+file.rename(old.filenames, new.filenames)
+rm(old.filenames, new.filenames)
+```
+
+### Read data from infotable
+```{r eval=FALSE}
+infoTable <- read_delim("infotable.csv", ";", escape_double = FALSE, trim_ws = TRUE)
+infoTable <- as.data.frame(infoTable, stringAsFactors = F)
+```
+
+### Load unfiltered data - from results we can get a good estimate of choosing filtering options
+```{r eval=FALSE}
+#re-order rows based on timepoint
+infoTable <- infoTable[order(infoTable$timepoint), ]
+
+#split data frame into a list of individual rows for better application, step 1
+infoTable.list <- setNames(split(infoTable, seq(nrow(infoTable))), rownames(infoTable))
+
+#step 2
+capture <- capture.output(infoTable.counts.sep <- lapply(infoTable.list, function(x)  InputFromTable(x, 
+                      platform="Visium",
+                      transpose = F) ))
+saveRDS(infoTable.counts.sep, file = "unfiltered_indv_objectlist.rds")
+
+spruce.unfilt <- MergeSTData(infoTable.counts.sep[[1]], infoTable.counts.sep[2:length(infoTable.counts.sep)], merge.data = TRUE)
+saveRDS(spruce.unfilt, file = "unfiltered_merged.rds")
+
+#subset captured output to only the genes that are removed
+genes_removed <- capture[seq(6, length(capture), 7)]
+
+#subset captured output to keep the features and spots under tissue from 
+exp_dim <- capture[seq(7, length(capture), 7)]
+
+#create data frame from information gathered above
+stats <- data.frame(row.names = infoTable$section_id,
+                    bud.name = infoTable$bud,
+                    features.removed.before.filtering = gsub(".*:", "", genes_removed), 
+                    features.kept.before.filtering = str_split(str_extract_all(exp_dim, "(?<=\\[).+?(?=\\])"), ",", simplify = T)[,1],
+                    spots.under.tissue.count = str_split(str_extract_all(exp_dim, "(?<=\\[).+?(?=\\])"), ",", simplify = T)[,2], stringsAsFactors = FALSE)
+
+#transform spots under tissue to be in %
+statsT <- stats %>% rownames_to_column('names') %>% mutate(spots.under.tissue.percent = paste((readr::parse_number(as.character(stats$spots.under.tissue.count))/5000)*100, "%")) %>%  column_to_rownames('names')
+
+subarray.df <- data.frame(subarray = row.names(statsT))
+statsT <- cbind(subarray.df, statsT)
+
+write.table(x = statsT, file = "filtering_before_stats.tsv", row.names = F, col.names = T, quote = F, sep = "\t")
+
+rm(infoTable.counts.sep, capture, stats, statsT, subarray.df, genes_removed, exp_dim)
+```
+
+Populate the stats file in supplementary data
+
+```{r stats_each_bud, eval=FALSE, warning=FALSE, message=FALSE}
+spruce.unfilt.list <- readRDS("unfiltered_indv_objectlist.rds")
+for(i in 1:length(spruce.unfilt.list)){
+  print(unique(spruce.unfilt.list[[i]]$array_id))
+  print(unique(spruce.unfilt.list[[i]]$bud))
+  print(unique(spruce.unfilt.list[[i]]$tissue_type))
+  
+  spruce.unfilt.list[[i]] <- spruce.unfilt.list[[i]][rowSums(spruce.unfilt.list[[i]]) >0, colSums(spruce.unfilt.list[[i]]) > 0]
+  spruce.unfilt.list[[i]] <- UpdateSeuratObject(spruce.unfilt.list[[i]])
+  
+  print(length(rownames(spruce.unfilt.list[[i]])))
+  print(length(colnames(spruce.unfilt.list[[i]])))
+  print(sum(spruce.unfilt.list[[i]]$nCount_RNA))
+}
+```
+
+Make spatial plots for the bracts and scales spots (supplementary data)
+
+```{r plots_on_tissue, eval=FALSE, warning=FALSE, message=FALSE}
+spruce.unfilt.list <- readRDS("unfiltered_indv_objectlist.rds")
+plots <- list()
+for(i in 1:length(spruce.unfilt.list)){
+  spruce.unfilt.list[[i]] <- LoadImages(object = spruce.unfilt.list[[i]], xdim = 2000)
+  print(unique(spruce.unfilt.list[[i]]$tissue_type))
+  plots[[i]] <- FeatureOverlay(object = spruce.unfilt.list[[i]], features = "tissue_type", ncols = 1, label.by = "array_id", pt.size = 1, pt.alpha = 6)
+}
+#p <- cowplot::plot_grid(plotlist = plots[c(1:3, 7:12, 16:21, 25:27)], ncol = 5, nrow = 4)
+p <- cowplot::plot_grid(plotlist = plots, ncol = 5, nrow = 4)
+ggsave(plot = p, filename = "BvSvN_onTissue_test.pdf", dpi = 3000, height = 25, width = 25)
+```
+
+### Loading filtered data
+
+Read each row from data frame and :
+
+1. split data frame into a list of rows
+2. capture output when each row is converted into a seurat object, filtering step applied here
+3. use capture to generate stats table for filtered data
+
+```{r eval=FALSE}
+#re-order rows based on timepoint
+infoTable <- infoTable[order(infoTable$timepoint), ]
+
+#split data frame into a list of individual rows for better application, step 1
+infoTable.list <- setNames(object = split(infoTable, seq(nrow(infoTable))), rownames(infoTable))
+
+#step 2
+capture <- capture.output(infoTable.counts.sep <- lapply(infoTable.list, function(x)  InputFromTable(x, 
+                      platform="Visium",
+                      transpose = F, 
+                      min.spot.feature.count = 100,  min.spot.count = 200) ))
+
+saveRDS(infoTable.counts.sep, file = "filtered_indv_objectlist.rds")
+
+#merge and save the filtered data
+spruce.filt <- MergeSTData(infoTable.counts.sep[[1]], infoTable.counts.sep[2:length(infoTable.counts.sep)], merge.data = TRUE)
+saveRDS(spruce.filt, file = "filtered_merged.rds")
+
+#step 3
+#subset captured output to only the genes that are removed
+genes_removed <- capture[seq(6, length(capture), 7)]
+
+#subset captured output to keep the features and spots under tissue from 
+exp_dim <- capture[seq(7, length(capture), 7)]
+
+#create data frame from information gathered above
+stats <- data.frame(row.names = infoTable$section_id,
+                    bud.name = infoTable$bud,
+                    features.removed.after.filtering = gsub(".*:", "", genes_removed), 
+                    features.kept.after.filtering = str_split(str_extract_all(exp_dim, "(?<=\\[).+?(?=\\])"), ",", simplify = T)[,1],
+                    spots.under.tissue.count = str_split(str_extract_all(exp_dim, "(?<=\\[).+?(?=\\])"), ",", simplify = T)[,2], stringsAsFactors = FALSE)
+
+#transform spots under tissue to be in %
+statsT <- stats %>% rownames_to_column('names') %>% mutate(spots.under.tissue.percent = paste((readr::parse_number(as.character(stats$spots.under.tissue.count))/5000)*100, "%")) %>%  column_to_rownames('names')
+
+subarray.df <- data.frame(subarray = row.names(statsT))
+statsT <- cbind(subarray.df, statsT)
+
+write.table(x = statsT, file = "filtering_after_stats.tsv", row.names = F, col.names = T, quote = F, sep = "\t")
+
+rm(infoTable.list, capture, stats, statsT, subarray.df, genes_removed, exp_dim)
+```
+
+### Normalisation and preparation for downstream analysis
+
+1. Apply normalisation at this to each seurat object from the list, this       gives a list of SCT normalised seurat objects
+2. Read the list of SCT normalised seurat objects
+
+Inspiration from https://satijalab.org/seurat/archive/v3.0/integration.html#sctransform
+
+```{r eval=FALSE}
+#step 1
+ST_list <- lapply(infoTable.counts.sep, function(x){
+                  SCTransform(x, verbose =F, vars.to.regress = c("nFeature_RNA"), return.only.var.genes = F)})
+
+saveRDS(ST_list, file = "SCT_indv_list.rds")
+```
+
+### Integrating dataset
+```{r eval=FALSE}
+spruce.features <- SelectIntegrationFeatures(object.list = ST_list)
+
+saveRDS(spruce.features, file = "integrationFeatures_07-05-21.rds")
+
+#modifying the maximum size of global variables
+options(future.globals.maxSize = 8000 * 1024^2)
+
+ST_list <- PrepSCTIntegration(object.list = ST_list, anchor.features = spruce.features, verbose = FALSE)
+
+saveRDS(ST_list, file = "prepSCTIntegration_07-05-21.rds")
+
+spruce.merged <- MergeSTData(ST_list[[1]], ST_list[2:length(ST_list)], merge.data = TRUE)
+
+saveRDS(spruce.merged, file = "spruce_merged_07-05-2021.rds")
+
+#We stop here and do not perform any downstreadm analysis steps. This is because we already have clustering results from the larger dataset and we do not want to do that again. What we intend to do here, is rather a DE analysis on the selected spots so we proceed with that instead.
+```
+
+# Differential expression analysis
+
+```{r eval=FALSE}
+library(pheatmap)
+library(DESeq2)
+library(edgeR)
+library(data.table)
+library(RColorBrewer)
+
+#for the heatmaps
+spruce.merged <- readRDS("~/Documents/23-02-2021_spruce_new/06-05-21_targeted_analysis/spruce_merged_07-05-2021.rds")
+metadata.spruce <- spruce.merged@meta.data
+counts.spruce <- as.matrix(spruce.merged@assays$SCT@counts)
+```
+
+### Bracts vs scales (september WT)
+```{r}
+spruce.merged <- readRDS("spruce_merged_07-05-2021.rds")
+metadata.spruce <- spruce.merged@meta.data
+counts.spruce <- as.matrix(spruce.merged@assays$SCT@counts)
+```
+
+```{r}
+subset.scales.bracts <- SubsetSTData(object = spruce.merged, spots = colnames(spruce.merged)[spruce.merged$tissue_type != "Needles" & spruce.merged$timepoint == "Sept" & spruce.merged$stage != "Acro"])
+
+markers.bs.sept <- FindMarkers(object = subset.scales.bracts, assay = "SCT", ident.1 = c("Bracts"), only.pos = F, test.use = "bimod", ident.2 = c("Scales"), group.by = "tissue_type", random.seed = 89)
+markers.bs.sept <- markers.bs.sept[markers.bs.sept$p_val_adj < 0.01, ]
+markers.bs.sept <- markers.bs.sept[order(markers.bs.sept$avg_log2FC, decreasing = T), ]
+write.csv(markers.bs.sept, row.names = T, col.names = T, file = "bracts_vs_scales_sept_WTFem.csv")
+```
+
+### Bracts vs scales (october WT)
+```{r}
+subset.scales.bracts.oct <- SubsetSTData(object = spruce.merged, spots = colnames(spruce.merged)[spruce.merged$tissue_type != "Needles" & spruce.merged$timepoint == "Oct" & spruce.merged$stage != "Acro"])
+
+markers.bs.oct <- FindMarkers(object = subset.scales.bracts.oct, assay = "SCT", ident.1 = c("Bracts"), only.pos = F, test.use = "bimod", ident.2 = c("Scales"), group.by = "tissue_type", random.seed = 91)
+markers.bs.oct <- markers.bs.oct[markers.bs.oct$p_val_adj < 0.01, ]
+markers.bs.oct <- markers.bs.oct[order(markers.bs.oct$avg_log2FC, decreasing = T), ]
+write.csv(markers.bs.oct, row.names = T, col.names = T, file = "bracts_vs_scales_oct_WTFem.csv")
+```
+
+### Bracts vs scales (october acrocona)
+```{r}
+acro.oct.bs <- SubsetSTData(object = spruce.merged, spots = colnames(spruce.merged)[spruce.merged$tissue_type != "Needles" & spruce.merged$timepoint == "Oct" & spruce.merged$stage == "Acro"])
+
+markers.bs.oct.acro <- FindMarkers(object = acro.oct.bs, assay = "SCT", ident.1 = c("Bracts"), only.pos = F, test.use = "bimod", ident.2 = c("Scales"), group.by = "tissue_type", random.seed = 13)
+markers.bs.oct.acro <- markers.bs.oct.acro[markers.bs.oct.acro$p_val_adj < 0.01, ]
+markers.bs.oct.acro <- markers.bs.oct.acro[order(markers.bs.oct.acro$avg_log2FC, decreasing = T), ]
+write.csv(markers.bs.oct.acro, row.names = T, col.names = T, file = "bracts_vs_scales_oct_acrocona.csv")
+```
+
+# Violin plots
+
+DAL2 - MA-211156g0010
+DAL14 - MA-20467g0010
+YABBYA - MA-10432332g0010
+YABBB - MA-112273g0010
+
+```{r}
+genes <- c("MA-211156g0010", "MA-20467g0010", "MA-10432332g0010", "MA-112273g0010")
+
+indir <- getwd()
+```
+
+
+## All (Sept, October buds - Veg, Acro and female)
+```{r}
+for(i in genes){
+  p <- VlnPlot(object = spruce.merged, assay = "SCT", features = i, group.by = "tissue_type", pt.size = 0.1)
+  ggsave(filename = paste(indir, "/violins/", i, "_alldatapoints.pdf", sep = ""), dpi = 300, plot = p)
+}
+```
+
+## Only October Female
+```{r}
+spruce.temp <- SubsetSTData(object = spruce.merged, spots = colnames(spruce.merged)[spruce.merged$timepoint == "Oct" & spruce.merged$stage == "Fem"])
+for(i in genes){
+  p <- VlnPlot(object = spruce.temp, assay = "SCT", features = i, group.by = "tissue_type", pt.size = 0.1)
+  ggsave(filename = paste(indir, "/violins/", i, "_OctFem_Only.pdf", sep = ""), dpi = 300, plot = p)
+}
+
+rm(spruce.temp)
+```
+
+## Only Acrocona
+```{r}
+spruce.temp <- SubsetSTData(object = spruce.merged, spots = colnames(spruce.merged)[spruce.merged$stage == "Acro"])
+for(i in genes){
+  p <- VlnPlot(object = spruce.temp, assay = "SCT", features = i, group.by = "tissue_type", pt.size = 0.1)
+  ggsave(filename = paste(indir, "/violins/", i, "_Acrocona_Only.pdf", sep = ""), dpi = 300, plot = p)
+}
+```
