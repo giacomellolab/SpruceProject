@@ -40,14 +40,14 @@ suppressPackageStartupMessages({
 *PCA, Harmony, UMAP learning, FindNeighbours and FindClusters*
 
  -Dimensions = 28
-    Selected 28 instead of the initial 50 dimensions (that       were used in Alina's pipeline) after careful observation of PCA scores of all 50 contributing dimensions using heatmaps and elbowplots; then selected the ones which good pca scores
+    Selected 28 after careful observation of PCA scores of all 50 contributing dimensions using heatmaps and elbowplot; then selected the ones which good pca scores.
     
- -Resolution = 1.15 (same as in Alina's pipeline)
+ -Resolution = 1.15 for most optimal clusters count.
 
 OBS! Make sure to save objects at each step, helps save a lot of time if the steps need to be redone (for example, if we need multiple steps to tweak parameters for getting the right/desired number of clusters)
 
 ```{r echo=FALSE}
-spruce.merged <- readRDS("~/Documents/23-02-2021_spruce_new/spruce_merged_obj_19-03-2021.rds")
+spruce.merged <- readRDS(paste(indir, "/Spruce/spruce_merged_obj_19-03-2021.rds", sep = ""))
 
 #PCA
 spruce.merged.PCA <- RunPCA(object = spruce.merged, assay = "SCT", features = spruce.features) 
@@ -73,15 +73,12 @@ saveRDS(spruce.merged.PCA.harmony, file = "spruce_merged_PCA_harmony_Umap_FindNe
 1. The integration step from (2_Normalisation_filteredData.Rmd) requires us to reload the images into the seurat object
 
 ```{r echo=FALSE}
-#<spruce.merged.PCA.harmony@tools$Staffli@imgs = imgs>; done if image paths are different for the object or the object is moved from server to local otherwise below step works just fine
 spruce.merged.PCA.harmony <- LoadImages(spruce.merged.PCA.harmony, time.resolve = F, verbose = F)
 ```
 
-2. Custom color palettes for the spruce clusters, can be changed later
+2. Custom color palettes for the spruce clusters
 
 ```{r echo=FALSE}
-spruce.fill <- readRDS("~/Documents/23-02-2021_spruce_new/new_analysis_local/figs_28dims/clustering_set3/spruce.fill.rds")
-
 library(RColorBrewer)
 n <- 60
 qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
@@ -89,10 +86,9 @@ qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
 col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
 ```
 
-
 ## Visualisation of clusters and batch corrected, filtered, normalised data
 
-1. Visualising clusters, verifying if batch correction is achieved successfully from harmony; kind of sanity check
+1. Visualising clusters, verifying if batch correction is achieved successfully from harmony (kind of sanity check).
 
 Cluster colors in UMAP dimensions
 

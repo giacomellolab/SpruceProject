@@ -1,0 +1,80 @@
+---
+title: "Normalisation, using SCTransform"
+author: "Yuvarani Masarapu"
+date: "4/9/2021"
+output: html_document
+---
+
+```{r global-options, include=FALSE}
+knitr::opts_chunk$set(fig.path='figs/', fig.width=14, fig.height=10, warning=FALSE, message=FALSE, echo = FALSE)
+```
+
+```{r libraries-load, echo=FALSE}
+suppressPackageStartupMessages({
+  library(STutility)
+  library(Seurat)
+  library(harmony)
+  library(gridExtra)
+  library(pals)
+  library(akima)
+  library(readr)
+  library(plotly)
+  library(tibble)
+  library(raster)
+  library(dplyr)
+  library(stringr)
+  library(magrittr)
+  library(ggplot2)
+  library(imager)
+  library(Matrix)
+  library(cowplot)
+  require(data.table)
+  library(magick)
+  library(grid)
+  library(SeuratObject)
+})
+```
+
+## Normalisation of the data and preparation for downstream analysis
+
+Apply normalisation at this point to each seurat object from the infoTable list (infotable_counts.rds) saved from script (1_LoadData_Filtering.Rmd), this will give a list of SCTransformed and normalised seurat objects.
+
+Inspiration from https://satijalab.org/seurat/archive/v3.0/integration.html#sctransform
+
+```{r echo=FALSE}
+infoTable.counts.sep <- readRDS(file = "~/Documents/23-02-2021_spruce_new/infotable_counts.rds")
+
+ST_list <- lapply(infoTable.counts.sep, function(x){
+                  SCTransform(x, verbose = F, vars.to.regress = c("nFeature_RNA"), return.only.var.genes = F)})
+
+saveRDS(ST_list, file = "indv_SCT_filt_list.rds")
+```
+
+2. Select features for downstream integration
+
+- make sure to save files at each step, helps not lose data if the objects are too big; helps address the "vector memory exhaust" error if you are running this on your local computer/laptop.
+
+- 25k features chosen from pipeline optimised by Alina Orozco for the spruce samples (http://uu.diva-portal.org/smash/get/diva2:1502197/FULLTEXT01.pdf)
+
+- RAM memory is increased to 16GB (using **options(future.globals.maxSize = 8000 * 1024^2)**) because loading the seurat objects until this point consumed 4GB RAM which was the default set earlier.
+
+```{r echo=FALSE}
+spruce.features <- SelectIntegrationFeatures(object.list = ST_list, nfeatures = 25000)
+
+saveRDS(spruce.features, file = "integrationFeatures_16-03-21.rds")
+
+#modifying the maximum size of global variables
+options(future.globals.maxSize = 8000 * 1024^2)
+
+ST_list <- PrepSCTIntegration(object.list = ST_list, anchor.features = spruce.features, verbose = FALSE)
+
+saveRDS(ST_list, file = "prepSCTIntegration_16-03-21.rds")
+```
+
+3. Merge the seurat objects
+
+```{r}
+spruce.merged <- MergeSTData(indv_SCT_filt_list[[1]], indv_SCT_filt_list[2:length(indv_SCT_filt_list)], merge.data = TRUE)
+
+saveRDS(spruce.merged, file = paste(indir, "/Spruce/spruce_merged_obj_19-03-2021.rds", sep = ""))
+```

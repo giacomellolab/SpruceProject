@@ -38,16 +38,12 @@ suppressPackageStartupMessages({
 ## Prep before visualisation
 
 ```{r echo=FALSE}
-spruce.merged.PCA.harmony <- readRDS("~/Documents/23-02-2021_spruce_new/spruce_merged_PCA_harmony_Umap_FindNeigh_findClusters.rds")
+spruce.merged.PCA.harmony <- readRDS("spruce_merged_PCA_harmony_Umap_FindNeigh_findClusters.rds")
 ```
 
 Load Custom color palettes for the spruce clusters
 
 'col_vector' used for visualising clusters when plotting dimplots, gives good distinct colors. 'spruce.fill' used for plots and images from seurat and STUtility.
-
-OBS! 'spruce.fill' did not work for visualising clusters from dimplots for some reason but worked well when applied to FeaturePlots and FeatureOverlays
-
-Custom color palette - locked on 23-03-2021, 'spruce_color_new'??
 
 ```{r echo=FALSE}
 spruce.fill <- readRDS("~/Documents/23-02-2021_spruce_new/new_analysis_local/figs_28dims/clustering_set3/spruce.fill.rds")
@@ -58,7 +54,7 @@ qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
 
 col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
 
-spruce_color_new <- readRDS("~/Documents/shiny_spruce/spruce_color_new.rds")
+spruce_color_new <- readRDS("~/Documents/shiny_spruce/spruce_color_new.rds") #custom color palette for the plots
 ```
 
 
@@ -67,16 +63,18 @@ spruce_color_new <- readRDS("~/Documents/shiny_spruce/spruce_color_new.rds")
 1. Plotting clusters on hires images (all clusters plotted per image)
 
 ```{r}
-infotable <- read.csv("/Users/yuvarani.masarapu/Documents/23-02-2021_spruce_new/new_analysis_local/figs_28dims/infotable.csv")
-infotable <- infotable[order(infotable$timepoint), ]
-#I do ordering because my initial infotable was timepoint-sorted and I want the bud names to be sorted as well; this is done in order to get the right names when images are saved.
+infotable <- read.csv("infotable.csv")
+infotable <- infotable[order(infotable$timepoint), ] #I do ordering because my initial infotable was timepoint-sorted and I want the bud names to be sorted as well; this is done in order to get the right names when images are saved.
 
 #check if everything (sorting done above) is correct, should display TRUE
 length(infotable$section_id) == length(unique(spruce.merged.PCA.harmony@meta.data$section_id))
 
 #save the bud names in bud.names, which are used later in the code to save each image as bud name
 bud.names <- infotable$bud
+```
 
+
+```{r}
 #reload images IF required
 spruce.merged.PCA.harmony <- LoadImages(spruce.merged.PCA.harmony, time.resolve = F, verbose = F)
 
@@ -88,7 +86,7 @@ names(colors.test) <- levels(spruce.merged.PCA.harmony$seurat_clusters)
 #names(colors.test) <- unique(spruce.merged.PCA.harmony$seurat_clusters)
 
 for ( i in 1:length(unique(spruce.merged.PCA.harmony@meta.data$section_id))){
-  filename = paste0("/Users/yuvarani.masarapu/Documents/23-02-2021_spruce_new/new_imgs_23-03-2021/", bud.names[i], "_section" ,i ,"_clusters_onHE.png", sep = "")
+  filename = paste0(indir, bud.names[i], "_section" ,i ,"_clusters_onHE.png", sep = "")
   p= FeatureOverlay(object = spruce.merged.PCA.harmony,  features = "seurat_clusters", pt.size = 0.7, sampleids = i, cols = colors.test, pt.alpha = 2)
   png(filename, height = 1100, width = 1000, res = 250) 
   print(p)
@@ -96,16 +94,14 @@ for ( i in 1:length(unique(spruce.merged.PCA.harmony@meta.data$section_id))){
 }
 ```
 
-
 ```{r}
-#custom plot, written by Åsa Björklund
+#custom plot for Spatial heatmaps, written by Åsa Björklund
 get.stplot = function(pl){
   g1 = ggplot_gtable(ggplot_build(pl))
   gtmp = g1$grobs[[6]]$children[[3]]$children[[1]]$children[[1]]$grobs[[6]]$children[[3]]$children[[1]]$children$layout$grobs[[6]]$children[[3]]$children[[1]]$children$layout$grobs[[5]]
   return(gtmp)
 }
 ```
-
 
 2. Plot clusters on hires images; each image containing all sections per sub_array (required by Nathan)
 
@@ -144,32 +140,25 @@ for (i in 1:length(arrayid.names))
   img1 <- gridExtra::grid.arrange(grobs = plots, ncol=2, nrow=row)
   img1 <- gridExtra::arrangeGrob(img1, top = arrayid.names[i])
     
-  filename = paste0("/Users/yuvarani.masarapu/Documents/23-02-2021_spruce_new/clusters_perSubArray/", arrayid.names[i],    "_allSections.png", sep = "")
+  filename = paste0(indir, "/clusters_perSubArray/", arrayid.names[i], "_allSections.png", sep = "")
   ggsave(filename, img1, width = 40, height = 50, units = "cm")
   invisible(dev.off())
 }
 ```
 
-
-3. Find marker genes from all clusters
-
-```{r}
-Markers <- FindAllMarkers(spruce.merged.PCA.harmony, assay = "SCT")
-write.csv(Markers, file = "AllMarkers.csv", col.names = TRUE, row.names = TRUE)
-```
-
-
-4. Plot clusters for each section separately for better visualisation
+3. Plot clusters for each section separately for better visualisation
 
 ```{r echo=FALSE}
 #written by Åsa Björklund, NBIS
+#modified for our requirement
 #this function subsets the object for every section and then plots the spots separately based on each cluster. This gives us individual clusters plotted for each section and avoids the confusion created when using 'split.label = T' in FeatureOverlay()
+
 ids = unique(spruce.merged.PCA.harmony$section_id)
 
 for (i in 1:length(unique(spruce.merged.PCA.harmony$section_id))){
   
   plots = list()
-  
+
   for (cl in levels(spruce.merged.PCA.harmony$seurat_clusters)){
     color = spruce.fill$x[as.numeric(cl)+1]
     spots = colnames(spruce.merged.PCA.harmony)[spruce.merged.PCA.harmony$section_id == ids[i] & spruce.merged.PCA.harmony$seurat_clusters == cl]
@@ -195,14 +184,14 @@ for (i in 1:length(unique(spruce.merged.PCA.harmony$section_id))){
   }
   
 img1 = gridExtra::grid.arrange(grobs = plots, ncol=4, nrow=4)
-name = paste0("/Users/yuvarani.masarapu/Documents/23-02-2021_spruce_new/indvClusters_perSection/",bud.names[i], "_section",i, "_indv_clusters.png")
+name = paste0(indir, "/indvClusters_perSection/", bud.names[i], "_section",i, "_indv_clusters.png")
 ggsave(name, img1)
 invisible(dev.off())
 }
 
 ```
 
-5. Plotting clusters on Grey/faded/white background
+4. Plotting clusters on Grey/faded/white background
 
 ```{r}
 colors.test <- spruce.fill$x
@@ -210,7 +199,7 @@ names(colors.test) <- levels(spruce.merged.PCA.harmony$seurat_clusters)
 
 for (i in 1:length(unique(spruce.merged.PCA.harmony$section_id))){
   p <- ST.FeaturePlot(spruce.merged.PCA.harmony, features = "seurat_clusters", indices = i , pt.size = 1.2, cols = colors.test)
-  file.name <- paste("/Users/yuvarani.masarapu/Documents/23-02-2021_spruce_new/featureplots/", bud.names[i],"_section",i, "_clusters_greyBackground.png", sep = "")
+  file.name <- paste(indir, "/featureplots/", bud.names[i],"_section",i, "_clusters_greyBackground.png", sep = "")
   png(file.name, height = 1100, width = 1000 ,res = 250)
   print(p)
   invisible(dev.off())

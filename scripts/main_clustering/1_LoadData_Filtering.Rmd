@@ -1,0 +1,225 @@
+---
+title: "Load Data to Seurat, and filtering"
+author: "Yuvarani Masarapu"
+date: "4/9/2021"
+output: html_document
+---
+
+```{r global-options, include=FALSE}
+knitr::opts_chunk$set(fig.path='figs/', fig.width=14, fig.height=10, warning=FALSE, message=FALSE, echo = FALSE)
+```
+
+```{r libraries-load, echo=FALSE}
+suppressPackageStartupMessages({
+  library(STutility)
+  library(Seurat)
+  library(harmony)
+  library(gridExtra)
+  library(pals)
+  library(akima)
+  library(readr)
+  library(plotly)
+  library(tibble)
+  library(raster)
+  library(dplyr)
+  library(stringr)
+  library(magrittr)
+  library(ggplot2)
+  library(imager)
+  library(Matrix)
+  library(cowplot)
+  require(data.table)
+  library(magick)
+  library(grid)
+  library(SeuratObject)
+})
+```
+
+## Extract raw data as data frame
+```{r}
+indir <- getwd()
+counts_dir <- paste(indir, "/gene_counts", sep = "")
+samples <- c(paste(counts_dir, "/Slide1_V19T26-100_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide1_V19T26-100_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide1_V19T26-100_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide1_V19T26-100_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide1_V19T26-100_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide1_V19T26-100_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide1_V19T26-100_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide1_V19T26-100_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide1_V19T26-100_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide1_V19T26-100_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide1_V19T26-100_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide2_V19T26-029_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide2_V19T26-029_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide2_V19T26-029_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide2_V19T26-029_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide2_V19T26-029_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide2_V19T26-029_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide2_V19T26-029_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide2_V19T26-029_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide2_V19T26-029_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide2_V19T26-029_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide2_V19T26-029_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide2_V19T26-029_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide3_V19T26-078_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide3_V19T26-078_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide3_V19T26-078_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide3_V19T26-078_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide3_V19T26-078_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide3_V19T26-078_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide3_V19T26-078_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide3_V19T26-078_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide3_V19T26-078_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide3_V19T26-078_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide4_V19T26-079_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide5_V10F24-116_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide5_V10F24-116_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide5_V10F24-116_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide5_V10F24-116_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide5_V10F24-116_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide6_V10F24-117_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide6_V10F24-117_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide6_V10F24-117_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide6_V10F24-117_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide6_V10F24-117_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide6_V10F24-117_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide6_V10F24-117_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide6_V10F24-117_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide6_V10F24-117_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide6_V10F24-117_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide6_V10F24-117_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide6_V10F24-117_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide6_V10F24-117_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide6_V10F24-117_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide7_V10F24-109_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide7_V10F24-109_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide7_V10F24-109_A1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide7_V10F24-109_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide7_V10F24-109_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide7_V10F24-109_B1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide7_V10F24-109_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide7_V10F24-109_C1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide7_V10F24-109_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide7_V10F24-109_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide7_V10F24-109_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide7_V10F24-109_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide7_V10F24-109_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide7_V10F24-109_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide7_V10F24-109_D1_trimmed_stdata.tsv", sep = ""),
+            paste(counts_dir, "/Slide7_V10F24-109_D1_trimmed_stdata.tsv", sep = ""))
+
+
+spotfiles <- list.files(path = paste(indir, "/spot_files_from_json", sep = ""), pattern = ".tsv$", full.names = T)
+
+section_id <- c("V19T26-100-A1-1", "V19T26-100-A1-2", "V19T26-100-B1-1", "V19T26-100-B1-2", "V19T26-100-B1-3", "V19T26-100-C1-1", "V19T26-100-C1-2", "V19T26-100-C1-3", "V19T26-100-D1-1", "V19T26-100-D1-2", "V19T26-100-D1-3", "V19T26-029-A1-1", "V19T26-029-A1-2", "V19T26-029-B1-1", "V19T26-029-B1-2", "V19T26-029-C1-1", "V19T26-029-C1-2", "V19T26-029-C1-3", "V19T26-029-C1-4", "V19T26-029-D1-1", "V19T26-029-D1-2", "V19T26-029-D1-3", "V19T26-029-D1-4", "V19T26-078-A1-1", "V19T26-078-A1-2", "V19T26-078-A1-3", "V19T26-078-B1-1", "V19T26-078-B1-2", "V19T26-078-B1-3", "V19T26-078-C1-1", "V19T26-078-C1-2", "V19T26-078-D1-1", "V19T26-078-D1-2", "V19T26-079-A1-1", "V19T26-079-A1-2", "V19T26-079-A1-3", "V19T26-079-A1-4", "V19T26-079-A1-5", "V19T26-079-B1-1", "V19T26-079-B1-2", "V19T26-079-B1-3", "V19T26-079-B1-4", "V19T26-079-C1-1", "V19T26-079-C1-2", "V19T26-079-C1-3", "V19T26-079-C1-4", "V19T26-079-C1-5", "V19T26-079-D1-1", "V19T26-079-D1-2", "V19T26-079-D1-3", "V19T26-079-D1-4", "V19T26-079-D1-5", "V19T26-079-D1-6", "V10F24-116-B1-1", "V10F24-116-B1-2", "V10F24-116-B1-3", "V10F24-116-B1-4", "V10F24-116-B1-5", "V10F24-117-A1-1", "V10F24-117-A1-2", "V10F24-117-A1-3", "V10F24-117-A1-4", "V10F24-117-B1-1", "V10F24-117-B1-2", "V10F24-117-B1-3", "V10F24-117-B1-4", "V10F24-117-C1-1", "V10F24-117-C1-2", "V10F24-117-C1-3", "V10F24-117-D1-1", "V10F24-117-D1-2", "V10F24-117-D1-3", "V10F24-109-A1-1", "V10F24-109-A1-2", "V10F24-109-A1-3", "V10F24-109-B1-1", "V10F24-109-B1-2", "V10F24-109-B1-3", "V10F24-109-C1-1", "V10F24-109-C1-2", "V10F24-109-D1-1", "V10F24-109-D1-2", "V10F24-109-D1-3", "V10F24-109-D1-4", "V10F24-109-D1-5", "V10F24-109-D1-6", "V10F24-109-D1-7", "V10F24-109-D1-8")
+
+array_id <- c(rep("V19T26-100-A1", 2), rep("V19T26-100-B1",3) , rep("V19T26-100-C1",3), rep("V19T26-100-D1", 3), rep("V19T26-029-A1",2), rep("V19T26-029-B1", 2), rep("V19T26-029-C1",4), rep("V19T26-029-D1", 4), rep("V19T26-078-A1",3), rep("V19T26-078-B1", 3), rep("V19T26-078-C1",2), rep("V19T26-078-D1", 2), rep("V19T26-079-A1",5), rep("V19T26-079-B1", 4), rep("V19T26-079-C1",5), rep("V19T26-079-D1", 6), rep("V10F24-116-B1",5), rep("V10F24-117-A1", 4), rep("V10F24-117-B1",4), rep("V10F24-117-C1", 3), rep("V10F24-117-D1",3), rep("V10F24-109-A1", 3), rep("V10F24-109-B1",3), rep("V10F24-109-C1", 2), rep("V10F24-109-D1",8))
+
+slide_id <- c(rep("V19T26-100", 11), rep("V19T26-029", 12), rep("V19T26-078", 10), rep("V19T26-079", 20), rep("V10F24-116",5), rep("V10F24-117", 14), rep("V10F24-109",16))
+
+
+timepoint<- c(rep("Sept",2),rep("Aug",9), rep("Sept",4), rep("Aug",4), rep("Sept",4), rep("Oct",10), rep("Sept",14), rep("Aug",15), rep("Sept",4), rep("Oct",14), rep("Aug",4), rep("Sept",4))
+
+stage<- c(rep("Fem",15), rep("Acro",8), rep("Veg",6), rep("Acro",13), rep("Veg",16), rep("Acro",4), rep("Veg",7), rep("Acro",3), rep("Fem",8), rep("Veg",8))
+
+bud<- c(rep("SeptFem1",2), rep("AugFem1",3), rep("AugFem2",6), rep("SeptFem2",2), rep("SeptFem3",2), rep("AugAcro1",2), rep("AugAcro2",2), rep("SeptAcro1",4), rep("OctVeg1",3), rep("OctVeg2",3), rep("OctAcro1",2), rep("OctAcro2",2), rep("SeptAcro2",5), rep("SeptAcro3",4), rep("SeptVeg1",3), rep("SeptVeg2",2), rep("AugVeg1",3), rep("AugVeg2",3), rep("AugVeg3",5), rep("AugAcro3",4), rep("SeptVeg3",4), rep("OctVeg3",3), rep("OctAcro3",3), rep("OctFem1",3), rep("OctFem2",3), rep("OctFem3",2), rep("AugVeg4",4), rep("SeptVeg4",4))
+
+imgs <- c(
+rep(paste(indir, "/Spruce_HE_images/Slide1_V19T26-100_A1_SeptFem1.jpg", sep = ""),2),    
+rep(paste(indir, "/Spruce_HE_images/Slide1_V19T26-100_B1_AugFem1.jpg", sep = ""),3), 
+rep(paste(indir, "/Spruce_HE_images/Slide1_V19T26-100_C1_AugFem2.jpg", sep = ""),3), 
+rep(paste(indir, "/Spruce_HE_images/Slide1_V19T26-100_D1_AugFem2.jpg", sep = ""),3),
+rep(paste(indir, "/Spruce_HE_images/Slide2_V19T26-029_A1_SeptFem2.jpg", sep = ""),2), 
+rep(paste(indir, "/Spruce_HE_images/Slide2_V19T26-029_B1_SeptFem3.jpg", sep = ""),2), 
+rep(paste(indir, "/Spruce_HE_images/Slide2_V19T26-029_C1_AugAcro1_2.jpg", sep = ""),4), 
+rep(paste(indir, "/Spruce_HE_images/Slide2_V19T26-029_D1_SeptAcro1.jpg", sep = ""),4), 
+rep(paste(indir, "/Spruce_HE_images/Slide3_V19T26-078_A1_OctVeg1.jpg", sep = ""),3), 
+rep(paste(indir, "/Spruce_HE_images/Slide3_V19T26-078_B1_OctVeg2.jpg", sep = ""),3), 
+rep(paste(indir, "/Spruce_HE_images/Slide3_V19T26-078_C1_OctAcro1.jpg", sep = ""),2), 
+rep(paste(indir, "/Spruce_HE_images/Slide3_V19T26-078_D1_OctAcro2.jpg", sep = ""),2), 
+rep(paste(indir, "/Spruce_HE_images/Slide4_V19T26-079_A1_SeptAcro2.jpg", sep = ""),5), 
+rep(paste(indir, "/Spruce_HE_images/Slide4_V19T26-079_B1_SeptAcro3.jpg", sep = ""),4), 
+rep(paste(indir, "/Spruce_HE_images/Slide4_V19T26-079_C1_SeptVeg1_2.jpg", sep = ""),5), 
+rep(paste(indir, "/Spruce_HE_images/Slide4_V19T26-079_D1_AugVeg1_2.jpg", sep = ""),6), 
+rep(paste(indir, "/Spruce_HE_images/Slide5_V10F24-116_B1_AugVeg3.jpg", sep = ""),5), 
+rep(paste(indir, "/Spruce_HE_images/Slide6_V10F24-117_A1_AugAcro3.jpg", sep = ""),4), 
+rep(paste(indir, "/Spruce_HE_images/Slide6_V10F24-117_B1_SeptVeg3.jpg", sep = ""),4), 
+rep(paste(indir, "/Spruce_HE_images/Slide6_V10F24-117_C1_OctVeg3.jpg", sep = ""),3), 
+rep(paste(indir, "/Spruce_HE_images/Slide6_V10F24-117_D1_OctAcro3.jpg", sep = ""),3), 
+rep(paste(indir, "/Spruce_HE_images/Slide7_V10F24-109_A1_OctFem1.jpg", sep = ""),3), 
+rep(paste(indir, "/Spruce_HE_images/Slide7_V10F24-109_B1_OctFem2.jpg", sep = ""),3), 
+rep(paste(indir, "/Spruce_HE_images/Slide7_V10F24-109_C1_OctFem3.jpg", sep = ""),2), 
+rep(paste(indir, "/Spruce_HE_images/Slide7_V10F24-109_D1_AugVeg4_SeptVeg4.jpg", sep = ""),8))
+  
+
+infoTable <- data.frame(samples, 
+                        spotfiles, 
+                        imgs, 
+                        section_id,
+                        array_id,
+                        slide_id,
+                        timepoint,
+                        stage,
+                        bud,
+                        stringsAsFactors = F)
+```
+
+## Loading data to seurat objects
+
+### Load raw data *without filtering*
+
+```{r}
+se <- InputFromTable(infotable = infoTable, 
+                                 platform = "Visium")
+
+saveRDS(se, paste(indir, "/Spruce/210222_spruce_raw_data.rds", sep = ""))
+se <- LoadImages(se, time.resolve = F, verbose = T)
+```
+
+### Load raw data *with filtering*
+
+This is a special step, instead of applying filtering on the unfiltered seurat object from above chunk, we re-do InputFromTable() with an extra filtering parameters defined. This makes sure that spots with low read count are recovered and not lost during the analysis.
+
+Read each row from data frame and :
+
+1. split data frame into a list of rows
+2. capture output when each row is converted into a seurat object, filtering step applied here; can be used later for statistics purpose.
+
+```{r}
+#re-order rows based on timepoint
+infoTable <- infoTable[order(infoTable$timepoint), ]
+
+#step 1; split data frame into a list of individual rows for better application
+infoTable.list <- setNames(split(infoTable, seq(nrow(infoTable))), rownames(infoTable))
+
+#step 2
+capture <- capture.output(infoTable.counts.sep <- lapply(infoTable.list, function(x)  InputFromTable(x, 
+                      platform="Visium",
+                      transpose = F, 
+                      min.spot.feature.count = 100,  min.spot.count = 200) ))
+
+saveRDS(infoTable.counts.sep, file = "infotable_counts.rds")
+spruce.filt.merged <- MergeSTData(infoTable.counts.sep[[1]], infoTable.counts.sep[2:length(infoTable.counts.sep)], merge.data = TRUE)
+
+saveRDS(spruce.filt.merged, paste(indir, "/Spruce/spruce.filt.merged.rds", sep = ""))
+```

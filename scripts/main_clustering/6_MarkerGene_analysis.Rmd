@@ -35,7 +35,14 @@ suppressPackageStartupMessages({
 })
 ```
 
-Venn diagram sets applied to find cluster specific markers and markers common to:
+# Find marker genes from all clusters
+
+```{r}
+Markers <- FindAllMarkers(spruce.merged.PCA.harmony, assay = "SCT")
+write.csv(Markers, file = "AllMarkers.csv", col.names = TRUE, row.names = TRUE)
+```
+
+## Venn diagram sets applied to find cluster specific markers and markers common to:
 
 1. pith clusters:0,1,6,7
 2. Vascular clusters:3,4,9,10,13
@@ -48,60 +55,59 @@ https://www.biostars.org/p/409790/
 ```{r}
 #Read the csv file which contain markers from all clusters
 library(readr)
-AllMarkers <- read_csv("~/Documents/23-02-2021_spruce_new/AllMarkers.csv")
+AllMarkers <- read_csv("AllMarkers.csv")
 
 #Remove the first column which is the same as last column
 AllMarkers <- AllMarkers[-1]
 
 #save markers from each cluster as a separate list/vector
 clus0 <- subset(AllMarkers, AllMarkers$cluster == 0)
-saveRDS(clus0, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/clus0.rds")
+saveRDS(clus0, file = paste(indir, "/markers_clusters/clus0.rds", sep = ""))
 
 clus1 <- subset(AllMarkers, AllMarkers$cluster == 1)
-saveRDS(clus1, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/clus1.rds")
+saveRDS(clus1, file = paste(indir, "/markers_clusters/clus1.rds", sep = ""))
 
 clus2 <- subset(AllMarkers, AllMarkers$cluster == 2)
-saveRDS(clus2, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/clus2.rds")
+saveRDS(clus2, file = paste(indir, "/markers_clusters/clus2.rds", sep = ""))
 
 clus3 <- subset(AllMarkers, AllMarkers$cluster == 3)
-saveRDS(clus3, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/clus3.rds")
+saveRDS(clus3, file = paste(indir, "/markers_clusters/clus3.rds", sep = ""))
 
 clus4 <- subset(AllMarkers, AllMarkers$cluster == 4)
-saveRDS(clus4, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/clus4.rds")
+saveRDS(clus4, file = paste(indir, "/markers_clusters/clus4.rds", sep = ""))
 
 clus5 <- subset(AllMarkers, AllMarkers$cluster == 5)
-saveRDS(clus5, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/clus5.rds")
+saveRDS(clus5, file = paste(indir, "/markers_clusters/clus5.rds", sep = ""))
 
 clus6 <- subset(AllMarkers, AllMarkers$cluster == 6)
-saveRDS(clus6, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/clus6.rds")
+saveRDS(clus6, file = paste(indir, "/markers_clusters/clus6.rds", sep = ""))
 
 clus7 <- subset(AllMarkers, AllMarkers$cluster == 7)
-saveRDS(clus7, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/clus7.rds")
+saveRDS(clus7, file = paste(indir, "/markers_clusters/clus7.rds", sep = ""))
 
 clus8 <- subset(AllMarkers, AllMarkers$cluster == 8)
-saveRDS(clus8, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/clus8.rds")
+saveRDS(clus8, file = paste(indir, "/markers_clusters/clus8.rds", sep = ""))
 
 clus9 <- subset(AllMarkers, AllMarkers$cluster == 9)
-saveRDS(clus9, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/clus9.rds")
+saveRDS(clus9, file = paste(indir, "/markers_clusters/clus9.rds", sep = ""))
 
 clus10 <- subset(AllMarkers, AllMarkers$cluster == 10)
-saveRDS(clus10, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/clus10.rds")
+saveRDS(clus10, file = paste(indir, "/markers_clusters/clus10.rds", sep = ""))
 
 clus11 <- subset(AllMarkers, AllMarkers$cluster == 11)
-saveRDS(clus11, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/clus11.rds")
+saveRDS(clus11, file = paste(indir, "/markers_clusters/clus11.rds", sep = ""))
 
 clus12 <- subset(AllMarkers, AllMarkers$cluster == 12)
-saveRDS(clus12, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/clus12.rds")
+saveRDS(clus12, file = paste(indir, "/markers_clusters/clus12.rds", sep = ""))
 
 clus13 <- subset(AllMarkers, AllMarkers$cluster == 13)
-saveRDS(clus13, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/clus13.rds")
+saveRDS(clus13, file = paste(indir, "/markers_clusters/clus13.rds", sep = ""))
 
 clus14 <- subset(AllMarkers, AllMarkers$cluster == 14)
-saveRDS(clus14, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/clus14.rds")
+saveRDS(clus14, file = paste(indir, "/markers_clusters/clus14.rds", sep = ""))
 
 clus15 <- subset(AllMarkers, AllMarkers$cluster == 15)
-saveRDS(clus15, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/clus15.rds")
-
+saveRDS(clus15, file = paste(indir, "/markers_clusters/clus15.rds", sep = ""))
 
 all.except.pith <- subset(AllMarkers, AllMarkers$cluster == c(2:5, 8:15))
 
@@ -110,15 +116,17 @@ all.except.vascular <- subset(AllMarkers, AllMarkers$cluster == c(0:2, 5:8, 11:1
 all.except.lateral <- subset(AllMarkers, AllMarkers$cluster == c(0:1, 3:10, 12:15))
 
 common_pith <- intersect(intersect(intersect(clus0$gene, clus1$gene), clus6$gene), clus7$gene)
-saveRDS(common_pith, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/common_pith.rds")
+saveRDS(common_pith, file = paste(indir, "/markers_clusters/common_pith.rds", sep = ""))
 
 common_vascular <- intersect(intersect(intersect(intersect(clus3$gene, clus4$gene), clus9$gene), clus10$gene), clus13$gene)
-saveRDS(common_vascular, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/common_vascular.rds")
+saveRDS(common_vascular, file = paste(indir, "/markers_clusters/common_vascular.rds", sep = ""))
 
 common_lateral <- intersect(clus2$gene, clus11$gene)
-saveRDS(common_lateral, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/common_lateral.rds")
+saveRDS(common_lateral, file = paste(indir, "/markers_clusters/common_lateral.rds", sep = ""))
+```
 
-#find unique pith markers in a vector
+### find unique pith markers in a vector
+```{r}
 j=1
 count=0
 vec.uniq.pith <- vector(mode = "character")
@@ -132,9 +140,11 @@ for (i in 1:length(common_pith)){
       j = j+1
     }
 }
-saveRDS(vec.uniq.pith, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/uniq_pith_genes.rds")
+saveRDS(vec.uniq.pith, file = paste(indir, "/markers_clusters/uniq_pith_genes.rds", sep = ""))
+```
 
-#find unique vascular markers in a vector
+### find unique vascular markers in a vector
+```{r}
 j=1
 count=0
 vec.uniq.vascular <- vector(mode = "character")
@@ -148,9 +158,11 @@ for (i in 1:length(common_vascular)){
       j = j+1
     }
 }
-saveRDS(vec.uniq.vascular, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/uniq_vascular_genes.rds")
+saveRDS(vec.uniq.vascular, file = paste(indir, "/markers_clusters/uniq_vascular_genes.rds", sep = ""))
+```
 
-#find unique lateral markers in a vector
+### find unique lateral markers in a vector
+```{r}
 j=1
 count=0
 vec.uniq.lateral <- vector(mode = "character")
@@ -164,22 +176,23 @@ for (i in 1:length(common_lateral)){
       j = j+1
     }
 }
-saveRDS(vec.uniq.lateral, file = "~/Documents/23-02-2021_spruce_new/markers_clusters/uniq_lateral_genes.rds")
+saveRDS(vec.uniq.lateral, file = paste(indir, "/markers_clusters/uniq_lateral_genes.rds", sep = ""))
+```
 
-
-#save all the information in an excel sheet
+### save all the information in an excel sheet
+```{r}
 list_of_datasets <-
   list("cluster0" = clus0, "cluster1" = clus1, "cluster2" = clus2, "cluster3" = clus3, "cluster4" = clus4, "cluster5" = clus5, "cluster6" = clus6, "cluster7" = clus7, "cluster8" = clus8, "cluster9" = clus9, "cluster10" = clus10, "cluster11" = clus11, "cluster12" = clus12, "cluster13" = clus13, "cluster14" = clus14, "cluster15" = clus15, 
 "pith_common" = data.frame("genes" = common_pith), "vascular_common" = data.frame("genes" = common_vascular), "lateral_common" = data.frame("genes" = common_lateral), "pith_unique" = data.frame("genes" = vec.uniq.pith), "vascular_unique" = data.frame("genes" = vec.uniq.vascular), "lateral_unique" = data.frame("genes" = vec.uniq.lateral))
 
-write_xlsx(list_of_datasets,"~/Documents/23-02-2021_spruce_new/markers_clusters/markers_in_clusters.xlsx")
+write_xlsx(list_of_datasets,paste(indir, "/markers_clusters/markers_in_clusters.xlsx", sep = ""))
 ```
 
 
-Find bud specific markers for cluster 15 which was troublesome in the biological analysis
+Find bud specific markers for cluster 15 which was troublesome (difficult to annotate or identify) in the biological analysis
 
 *OBS!* Set "min.cells.group = 1" if you get an error 
-  Error in ValidateCellGroups(object = object, cells.1 =         cells.1, cells.2 = cells.2,  : 
+  Error in ValidateCellGroups(object = object, cells.1 = cells.1, cells.2 = cells.2,  : 
   Cell group 1 has fewer than 3 cells
   
 This makes sure to set minimum number of spots in the cluster to 1, otherwise the function FindMarkers() by default takes minimum number of spots to be 3 and throws an error if the samples contain less than 3 spots for the particular cluster we want to find markers for.
@@ -187,11 +200,9 @@ This makes sure to set minimum number of spots in the cluster to 1, otherwise th
 Discussed here: https://github.com/satijalab/seurat/issues/1001
 
 ```{r}
-spruce <- readRDS(file = "~/Documents/23-02-2021_spruce_new/spruce_merged_PCA_harmony_Umap_FindNeigh_findClusters.rds")
+spruce <- readRDS(file = paste(indir, "/spruce_merged_PCA_harmony_Umap_FindNeigh_findClusters.rds", sep = ""))
 
 octAcro.15 <- FindMarkers(spruce, ident.1 = c("V19T26-078-C1-2", "V19T26-078-D1-1", "V10F24-117-D1-1"), group.by = c("section_id"), subset.ident = "15", test.use = "bimod")
-
-#octAcro.1 <- FindMarkers(spruce, ident.1 = "V19T26-078-C1-2", group.by = "section_id")
 
 octFem.15 <- FindMarkers(spruce, ident.1 = c("V10F24-109-A1-1", "V10F24-109-A1-2", "V10F24-109-A1-3", "V10F24-109-B1-1", "V10F24-109-B1-2", "V10F24-109-B1-3", "V10F24-109-C1-1", "V10F24-109-C1-2"), group.by = c("section_id"), subset.ident = "15", test.use = "bimod")
 
@@ -200,7 +211,6 @@ octVeg.15 <- FindMarkers(spruce, ident.1 = c("V19T26-078-A1-2", "V19T26-078-B1-1
 septAcro.15 <- FindMarkers(spruce, ident.1 = c("V19T26-029-D1-3", "V19T26-079-A1-3", "V19T26-079-A1-4", "V19T26-079-B1-3"), group.by = c("section_id"), subset.ident = "15", test.use = "bimod")
 
 septFem.15 <- FindMarkers(spruce, ident.1 = c("V19T26-029-B1-2"), group.by = c("section_id"), subset.ident = "15", test.use = "bimod", min.cells.group = 1)
-
 
 #save all in excel sheet
 octAcro.15$gene <- row.names(octAcro.15)
@@ -212,5 +222,5 @@ septFem.15$gene<- row.names(septFem.15)
 list_of_datasets <-
   list("OctAcro" = octAcro.15, "OctVeg" = octVeg.15, "OctFem" = octFem.15, "SeptAcro" = septAcro.15, "SeptFem" = septFem.15)
 
-write_xlsx(list_of_datasets,"~/Documents/23-02-2021_spruce_new/markers_clusters/cluster15_tissueSpecific_markers.xlsx")
+write_xlsx(list_of_datasets, file = paste(indir, "/markers_clusters/cluster15_tissueSpecific_markers.xlsx", sep = ""))
 ```

@@ -37,12 +37,12 @@ suppressPackageStartupMessages({
 
 # General statistics and plots
 
-### Statistics on Raw data (Unfiltered, Untransformed, not Normalised)
+### Statistics on raw data (Unfiltered, not Normalised)
 
 Violin plot showing distribution of gene counts and UMI counts.
 
 ```{r violin-unflt-data, message=FALSE, warning=FALSE, echo=FALSE}
-spruce.unfilt <- readRDS("~/Documents/23-02-2021_spruce_new/210222_spruce_raw_data.rds")
+spruce.unfilt <- readRDS(paste(indir, "/Spruce/210222_spruce_raw_data.rds", sep = ""))
 
 VlnPlot(spruce.unfilt, c("nCount_RNA","nFeature_RNA"), pt.size = 0.1)
 ```
@@ -84,17 +84,15 @@ spruce.unfiltered.PCA <- ScaleData(spruce.unfilt) %>% FindVariableFeatures() %>%
 saveRDS(spruce.unfiltered.PCA, "spruce_unfiltered_PCA.rds")
 ```
 
-
-###Statistics for filtered, normalised data
+### Statistics for filtered data
 
 Violin plots showing distribution of gene counts and UMI counts.
 
 ```{r violin-SCT-data, message=FALSE, warning=FALSE, echo=FALSE }
-spruce.filt.SCT <- readRDS("~/Documents/23-02-2021_spruce_new/spruce_merged_obj_19-03-2021.rds")
+spruce.filt.SCT <- readRDS(paste(indir, "/Spruce/spruce.filt.merged.rds", sep = ""))
 
 VlnPlot(spruce.filt.SCT, c("nCount_RNA","nFeature_RNA"), pt.size = 0.1)
 ```
-
 
 Histogram to plot count/expression distribution.
 
