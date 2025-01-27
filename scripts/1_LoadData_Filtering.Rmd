@@ -1,7 +1,7 @@
 ---
 title: "Load Data to Seurat, and filtering"
 author: "Yuvarani Masarapu"
-date: "4/9/2021"
+date: "3/16/2021"
 output: html_document
 ---
 
@@ -35,10 +35,14 @@ suppressPackageStartupMessages({
 })
 ```
 
+# Load data
+
 ## Extract raw data as data frame
 ```{r}
 indir <- getwd()
 counts_dir <- paste(indir, "/gene_counts", sep = "")
+
+#count files for each sample loaded as tsv files from gene_counts folder
 samples <- c(paste(counts_dir, "/Slide1_V19T26-100_A1_trimmed_stdata.tsv", sep = ""),
             paste(counts_dir, "/Slide1_V19T26-100_A1_trimmed_stdata.tsv", sep = ""),
             paste(counts_dir, "/Slide1_V19T26-100_B1_trimmed_stdata.tsv", sep = ""),
@@ -128,22 +132,28 @@ samples <- c(paste(counts_dir, "/Slide1_V19T26-100_A1_trimmed_stdata.tsv", sep =
             paste(counts_dir, "/Slide7_V10F24-109_D1_trimmed_stdata.tsv", sep = ""),
             paste(counts_dir, "/Slide7_V10F24-109_D1_trimmed_stdata.tsv", sep = ""))
 
-
+#spot alignment files from Loupe Browser loaded as json files from spot_files_from_json folder
 spotfiles <- list.files(path = paste(indir, "/spot_files_from_json", sep = ""), pattern = ".tsv$", full.names = T)
 
+#corresponding ids used as section_id names for each bud section sample loaded above
 section_id <- c("V19T26-100-A1-1", "V19T26-100-A1-2", "V19T26-100-B1-1", "V19T26-100-B1-2", "V19T26-100-B1-3", "V19T26-100-C1-1", "V19T26-100-C1-2", "V19T26-100-C1-3", "V19T26-100-D1-1", "V19T26-100-D1-2", "V19T26-100-D1-3", "V19T26-029-A1-1", "V19T26-029-A1-2", "V19T26-029-B1-1", "V19T26-029-B1-2", "V19T26-029-C1-1", "V19T26-029-C1-2", "V19T26-029-C1-3", "V19T26-029-C1-4", "V19T26-029-D1-1", "V19T26-029-D1-2", "V19T26-029-D1-3", "V19T26-029-D1-4", "V19T26-078-A1-1", "V19T26-078-A1-2", "V19T26-078-A1-3", "V19T26-078-B1-1", "V19T26-078-B1-2", "V19T26-078-B1-3", "V19T26-078-C1-1", "V19T26-078-C1-2", "V19T26-078-D1-1", "V19T26-078-D1-2", "V19T26-079-A1-1", "V19T26-079-A1-2", "V19T26-079-A1-3", "V19T26-079-A1-4", "V19T26-079-A1-5", "V19T26-079-B1-1", "V19T26-079-B1-2", "V19T26-079-B1-3", "V19T26-079-B1-4", "V19T26-079-C1-1", "V19T26-079-C1-2", "V19T26-079-C1-3", "V19T26-079-C1-4", "V19T26-079-C1-5", "V19T26-079-D1-1", "V19T26-079-D1-2", "V19T26-079-D1-3", "V19T26-079-D1-4", "V19T26-079-D1-5", "V19T26-079-D1-6", "V10F24-116-B1-1", "V10F24-116-B1-2", "V10F24-116-B1-3", "V10F24-116-B1-4", "V10F24-116-B1-5", "V10F24-117-A1-1", "V10F24-117-A1-2", "V10F24-117-A1-3", "V10F24-117-A1-4", "V10F24-117-B1-1", "V10F24-117-B1-2", "V10F24-117-B1-3", "V10F24-117-B1-4", "V10F24-117-C1-1", "V10F24-117-C1-2", "V10F24-117-C1-3", "V10F24-117-D1-1", "V10F24-117-D1-2", "V10F24-117-D1-3", "V10F24-109-A1-1", "V10F24-109-A1-2", "V10F24-109-A1-3", "V10F24-109-B1-1", "V10F24-109-B1-2", "V10F24-109-B1-3", "V10F24-109-C1-1", "V10F24-109-C1-2", "V10F24-109-D1-1", "V10F24-109-D1-2", "V10F24-109-D1-3", "V10F24-109-D1-4", "V10F24-109-D1-5", "V10F24-109-D1-6", "V10F24-109-D1-7", "V10F24-109-D1-8")
 
+#corresponding capture area ids for each sample loaded above
 array_id <- c(rep("V19T26-100-A1", 2), rep("V19T26-100-B1",3) , rep("V19T26-100-C1",3), rep("V19T26-100-D1", 3), rep("V19T26-029-A1",2), rep("V19T26-029-B1", 2), rep("V19T26-029-C1",4), rep("V19T26-029-D1", 4), rep("V19T26-078-A1",3), rep("V19T26-078-B1", 3), rep("V19T26-078-C1",2), rep("V19T26-078-D1", 2), rep("V19T26-079-A1",5), rep("V19T26-079-B1", 4), rep("V19T26-079-C1",5), rep("V19T26-079-D1", 6), rep("V10F24-116-B1",5), rep("V10F24-117-A1", 4), rep("V10F24-117-B1",4), rep("V10F24-117-C1", 3), rep("V10F24-117-D1",3), rep("V10F24-109-A1", 3), rep("V10F24-109-B1",3), rep("V10F24-109-C1", 2), rep("V10F24-109-D1",8))
 
+#corresponding slide id names assigned to each sample loaded above
 slide_id <- c(rep("V19T26-100", 11), rep("V19T26-029", 12), rep("V19T26-078", 10), rep("V19T26-079", 20), rep("V10F24-116",5), rep("V10F24-117", 14), rep("V10F24-109",16))
 
-
+#Timepoint for each sample. Used as metadata column in the anlaysis later
 timepoint<- c(rep("Sept",2),rep("Aug",9), rep("Sept",4), rep("Aug",4), rep("Sept",4), rep("Oct",10), rep("Sept",14), rep("Aug",15), rep("Sept",4), rep("Oct",14), rep("Aug",4), rep("Sept",4))
 
+#Budtype label for each sample loaded
 stage<- c(rep("Fem",15), rep("Acro",8), rep("Veg",6), rep("Acro",13), rep("Veg",16), rep("Acro",4), rep("Veg",7), rep("Acro",3), rep("Fem",8), rep("Veg",8))
 
+#Label given to each sample loaded above. Is called 'bud' in the metadata column 
 bud<- c(rep("SeptFem1",2), rep("AugFem1",3), rep("AugFem2",6), rep("SeptFem2",2), rep("SeptFem3",2), rep("AugAcro1",2), rep("AugAcro2",2), rep("SeptAcro1",4), rep("OctVeg1",3), rep("OctVeg2",3), rep("OctAcro1",2), rep("OctAcro2",2), rep("SeptAcro2",5), rep("SeptAcro3",4), rep("SeptVeg1",3), rep("SeptVeg2",2), rep("AugVeg1",3), rep("AugVeg2",3), rep("AugVeg3",5), rep("AugAcro3",4), rep("SeptVeg3",4), rep("OctVeg3",3), rep("OctAcro3",3), rep("OctFem1",3), rep("OctFem2",3), rep("OctFem3",2), rep("AugVeg4",4), rep("SeptVeg4",4))
 
+#Loading corresponging HnE image for each sample loaded above
 imgs <- c(
 rep(paste(indir, "/Spruce_HE_images/Slide1_V19T26-100_A1_SeptFem1.jpg", sep = ""),2),    
 rep(paste(indir, "/Spruce_HE_images/Slide1_V19T26-100_B1_AugFem1.jpg", sep = ""),3), 
@@ -171,7 +181,7 @@ rep(paste(indir, "/Spruce_HE_images/Slide7_V10F24-109_B1_OctFem2.jpg", sep = "")
 rep(paste(indir, "/Spruce_HE_images/Slide7_V10F24-109_C1_OctFem3.jpg", sep = ""),2), 
 rep(paste(indir, "/Spruce_HE_images/Slide7_V10F24-109_D1_AugVeg4_SeptVeg4.jpg", sep = ""),8))
   
-
+#Prepare the infotable to use it later to create the seurat object
 infoTable <- data.frame(samples, 
                         spotfiles, 
                         imgs, 
@@ -188,6 +198,8 @@ infoTable <- data.frame(samples,
 
 ### Load raw data *without filtering*
 
+We do this in order to extract and save a copy of the raw data represented as a seurat object with corresponding metadata labels
+
 ```{r}
 se <- InputFromTable(infotable = infoTable, 
                                  platform = "Visium")
@@ -196,6 +208,43 @@ saveRDS(se, paste(indir, "/Spruce/210222_spruce_raw_data.rds", sep = ""))
 se <- LoadImages(se, time.resolve = F, verbose = T)
 ```
 
+We also create individual seurat objects for each sample and create a list. We will capture the message that is split during this run in order to make the supplementary table with samples, spots information for later.
+
+```{r}
+#re-order rows based on timepoint
+infoTable <- infoTable[order(infoTable$timepoint), ]
+
+#split data frame into a list of individual rows for better application, step 1
+infoTable.list <- setNames(split(infoTable, seq(nrow(infoTable))), rownames(infoTable))
+
+#step 2
+capture <- capture.output(infoTable.counts.sep <- lapply(infoTable.list, function(x)  InputFromTable(x, 
+                      platform="Visium",
+                      transpose = F) ))
+
+#subset captured output to only the genes that are removed
+genes_removed <- capture[seq(6, length(capture), 7)]
+
+#subset captured output to keep the features and spots under tissue from 
+exp_dim <- capture[seq(7, length(capture), 7)]
+
+#create data frame from information gathered above
+stats <- data.frame(row.names = infoTable$section_id,
+                    bud.name = infoTable$bud,
+                    features.removed.before.filtering = gsub(".*:", "", genes_removed), 
+                    features.kept.before.filtering = str_split(str_extract_all(exp_dim, "(?<=\\[).+?(?=\\])"), ",", simplify = T)[,1],
+                    spots.under.tissue.count = str_split(str_extract_all(exp_dim, "(?<=\\[).+?(?=\\])"), ",", simplify = T)[,2], stringsAsFactors = FALSE)
+
+#transform spots under tissue to be in %
+statsT <- stats %>% rownames_to_column('names') %>% mutate(spots.under.tissue.percent = paste((readr::parse_number(as.character(stats$spots.under.tissue.count))/5000)*100, "%")) %>%  column_to_rownames('names')
+
+subarray.df <- data.frame(subarray = row.names(statsT))
+statsT <- cbind(subarray.df, statsT)
+
+write.table(x = statsT, file = "filtering_before_stats.tsv", row.names = F, col.names = T, quote = F, sep = "\t")
+```
+
+
 ### Load raw data *with filtering*
 
 This is a special step, instead of applying filtering on the unfiltered seurat object from above chunk, we re-do InputFromTable() with an extra filtering parameters defined. This makes sure that spots with low read count are recovered and not lost during the analysis.
@@ -203,7 +252,7 @@ This is a special step, instead of applying filtering on the unfiltered seurat o
 Read each row from data frame and :
 
 1. split data frame into a list of rows
-2. capture output when each row is converted into a seurat object, filtering step applied here; can be used later for statistics purpose.
+2. capture output when each row is converted into a seurat object, filtering step applied here; can be used later for statistics purpose (done as step 3 below)
 
 ```{r}
 #re-order rows based on timepoint
@@ -222,4 +271,153 @@ saveRDS(infoTable.counts.sep, file = "infotable_counts.rds")
 spruce.filt.merged <- MergeSTData(infoTable.counts.sep[[1]], infoTable.counts.sep[2:length(infoTable.counts.sep)], merge.data = TRUE)
 
 saveRDS(spruce.filt.merged, paste(indir, "/Spruce/spruce.filt.merged.rds", sep = ""))
+
+#step 3 - capture output and convert to statistics table
+#subset captured output to only the genes that are removed
+genes_removed <- capture[seq(6, length(capture), 7)]
+
+#subset captured output to keep the features and spots under tissue from 
+exp_dim <- capture[seq(7, length(capture), 7)]
+
+#create data frame from information gathered above
+stats <- data.frame(row.names = infoTable$section_id,
+                    bud.name = infoTable$bud,
+                    features.removed.after.filtering = gsub(".*:", "", genes_removed), 
+                    features.kept.after.filtering = str_split(str_extract_all(exp_dim, "(?<=\\[).+?(?=\\])"), ",", simplify = T)[,1],
+                    spots.under.tissue.count = str_split(str_extract_all(exp_dim, "(?<=\\[).+?(?=\\])"), ",", simplify = T)[,2], stringsAsFactors = FALSE)
+
+#transform spots under tissue to be in %
+statsT <- stats %>% rownames_to_column('names') %>% mutate(spots.under.tissue.percent = paste((readr::parse_number(as.character(stats$spots.under.tissue.count))/5000)*100, "%")) %>%  column_to_rownames('names')
+
+subarray.df <- data.frame(subarray = row.names(statsT))
+statsT <- cbind(subarray.df, statsT)
+
+write.table(x = statsT, file = "filtering_after_stats.tsv", row.names = F, col.names = T, quote = F, sep = "\t")
+
+#rm(infoTable.list, infoTable.counts.sep, capture, stats, statsT, subarray.df, genes_removed, exp_dim)
 ```
+
+# General statistics and plots
+
+## Plots on raw data (Unfiltered, not Normalised)
+
+Violin plot showing distribution of gene counts and UMI counts.
+
+```{r violin-unflt-data, message=FALSE, warning=FALSE, echo=FALSE}
+spruce.unfilt <- readRDS(paste(indir, "/Spruce/210222_spruce_raw_data.rds", sep = ""))
+
+VlnPlot(spruce.unfilt, c("nCount_RNA","nFeature_RNA"), pt.size = 0.1)
+```
+
+Histogram to plot count/expression distribution (raw data).
+
+```{r counts-unfiltt-data, message=FALSE, warning=FALSE, echo=FALSE}
+p1 <- ggplot() +
+  geom_histogram(data = spruce.unfilt[[]], aes(nFeature_RNA), fill = "red", alpha = 0.7, color = "gray", bins = 50) +
+  Seurat::DarkTheme() +
+  ggtitle("Unique genes per spot")
+
+p2 <- ggplot() +
+  geom_histogram(data = spruce.unfilt[[]], aes(nCount_RNA), fill = "red", alpha = 0.7, color = "gray", bins = 50) +
+  Seurat::DarkTheme() +
+  ggtitle("Total counts per spots")
+
+gene_attr <- data.frame(nUMI = Matrix::rowSums(spruce.unfilt@assays$RNA@counts), 
+                        nSpots = Matrix::rowSums(spruce.unfilt@assays$RNA@counts > 0))
+p3 <- ggplot() +
+  geom_histogram(data = gene_attr, aes(nUMI), fill = "red", alpha = 0.7, color = "gray", bins = 50) +
+  Seurat::DarkTheme() +
+  scale_x_log10() +
+  ggtitle("Total counts per gene (log10 scale)")
+
+p4 <- ggplot() +
+  geom_histogram(data = gene_attr, aes(nSpots), fill = "red", alpha = 0.7, color = "gray", bins = 50) +
+  Seurat::DarkTheme() +
+  ggtitle("Total spots per gene")
+
+cowplot::plot_grid(p1, p2, p3, p4)
+```
+
+Now, we Run PCA on 'untransformed' unfiltered data, find clusters with PCA embeddings
+
+```{r PCA-unfilt-data, message=FALSE, warning=FALSE, echo=FALSE }
+spruce.unfiltered.PCA <- ScaleData(spruce.unfilt) %>% FindVariableFeatures() %>% RunPCA() %>% RunUMAP(reduction = "pca", dims = 1:30) %>% FindNeighbors(reduction = "pca", dims = 1:30) %>% FindClusters()
+
+saveRDS(spruce.unfiltered.PCA, "spruce_unfiltered_PCA.rds")
+```
+
+## Spatial heatmaps
+
+### without tissue background
+```{r}
+spruce.unfilt <- LoadImages(spruce.unfilt, time.resolve = F, verbose = T)
+ST.FeaturePlot(object = spruce.unfilt, features = "nCount_RNA", ncol = 10, pt.size = 0.1, value.scale = c("all"), label.by = "section_id")
+ST.FeaturePlot(object = spruce.unfilt, features = "nFeature_RNA", ncol = 10, pt.size = 0.1, value.scale = c("all"), label.by = "section_id")
+```
+
+### with tissue background
+
+```{r}
+FeatureOverlay(object = spruce.unfilt, features = "nCount_RNA", sampleids = c(1:88), ncol = 10, pt.size = 0.1, value.scale = c("all"))
+FeatureOverlay(object = spruce.unfilt, features = "nFeature_RNA", sampleids = c(1:88), ncol = 10, pt.size = 0.1, value.scale = c("all"))
+```
+
+
+## Statistics for filtered data
+
+Violin plots showing distribution of gene counts and UMI counts.
+
+```{r violin-SCT-data, message=FALSE, warning=FALSE, echo=FALSE }
+spruce.filt <- readRDS(paste(indir, "/Spruce/spruce.filt.merged.rds", sep = ""))
+
+VlnPlot(spruce.filt, c("nCount_RNA","nFeature_RNA"), pt.size = 0.1)
+```
+
+Histogram to plot count/expression distribution.
+
+```{r plots-SCT-data, message=FALSE, warning=FALSE, echo=FALSE}
+p1 <- ggplot() +
+  geom_histogram(data = spruce.filt[[]], aes(nFeature_RNA), fill = "red", alpha = 0.7, color = "gray", bins = 50) +
+  Seurat::DarkTheme() +
+  ggtitle("Unique genes per spot")
+
+p2 <- ggplot() +
+  geom_histogram(data = spruce.filt[[]], aes(nCount_RNA), fill = "red", alpha = 0.7, color = "gray", bins = 50) +
+  Seurat::DarkTheme() +
+  ggtitle("Total counts per spots")
+
+gene_attr <- data.frame(nUMI = Matrix::rowSums(spruce.filt@assays$RNA@counts), 
+                        nSpots = Matrix::rowSums(spruce.filt@assays$RNA@counts > 0))
+p3 <- ggplot() +
+  geom_histogram(data = gene_attr, aes(nUMI), fill = "red", alpha = 0.7, color = "gray", bins = 50) +
+  Seurat::DarkTheme() +
+  scale_x_log10() +
+  ggtitle("Total counts per gene (log10 scale)")
+
+p4 <- ggplot() +
+  geom_histogram(data = gene_attr, aes(nSpots), fill = "red", alpha = 0.7, color = "gray", bins = 50) +
+  Seurat::DarkTheme() +
+  ggtitle("Total spots per gene")
+
+cowplot::plot_grid(p1, p2, p3, p4)
+```
+
+## Spatial heatmaps
+
+### without heatmaps
+
+```{r}
+spruce.filt <- LoadImages(spruce.filt, time.resolve = F, verbose = T)
+ST.FeaturePlot(object = spruce.filt, features = "nCount_RNA", ncol = 10, pt.size = 0.1, value.scale = c("all"))
+ST.FeaturePlot(object = spruce.filt, features = "nFeature_RNA", ncol = 10, pt.size = 0.1, value.scale = c("all"))
+```
+
+### with heatmaps
+
+### with tissue background
+
+```{r}
+FeatureOverlay(object = spruce.filt, features = "nCount_RNA", sampleids = c(1:88), ncol = 10, pt.size = 0.1, value.scale = c("all"))
+FeatureOverlay(object = spruce.filt, features = "nFeature_RNA", sampleids = c(1:88), ncol = 10, pt.size = 0.1, value.scale = c("all"))
+```
+
