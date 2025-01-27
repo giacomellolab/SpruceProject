@@ -1,0 +1,354 @@
+---
+title: "Cluster and Trajectory analysis of SublAcro, Theta2, res 1-2"
+author: "Sybil Herrera Foessel and Sami Saarenpää"
+date: "2024-08-30"
+output: html_document
+---
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+```{r}
+
+library(STutility)
+library(harmony)
+library(monocle3)
+library(SeuratWrappers)
+
+```
+
+
+#Read in Seurat rds file
+```{r}
+
+se <- readRDS("/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/se_object_Yuvarani/spruce_merged_PCA_harmony_Umap_FindNeigh_findClusters.rds")
+
+se
+```
+
+#Subset data with spots for lateral organs, Acro only (exclude Veg and Fem)  
+```{r}
+
+DimPlot(se, reduction ="umap", label= TRUE)
+# Subset data with spots cl 2, 11, 5, 8. 
+
+Subset.lateralAll<-SubsetSTData(object = se, spots = colnames(se)[se$seurat_clusters %in% c("2", "11", "5", "8")])
+
+Subset.lateralAll
+
+unique(Subset.lateralAll$stage)
+#[1] "Fem"  "Acro" "Veg" 
+
+#  EXCLUDE VEG and FEM
+Subset.lateralAcro<-SubsetSTData(object = Subset.lateralAll, spots = colnames(Subset.lateralAll)[Subset.lateralAll$stage %in% c("Acro")])
+
+
+#Save RDS file
+#saveRDS(Subset.lateralAcro, file = "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/se_object_Yuvarani/SubsetLateralAcro_1_August_2024.rds")
+``` 
+
+#Load subsetted lateral organ acro cluster 
+```{r}
+#Read in RDS file
+Subset.lateralAcro <- readRDS("/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/se_object_Yuvarani/SubsetLateralAcro_1_August_2024.rds")
+
+Subset.lateralAcro
+
+```
+
+```{r, fig.height=4, fig.width=6}
+#Subset created object
+sections<- unique(Subset.lateralAcro[[]]$section_id)
+
+separate.subset.lateralAcro <- c()
+for (i in 1:28){
+#print(section_id[[i]])
+separate.subset.lateralAcro[[i]] <- SubsetSTData(Subset.lateralAcro, spots = colnames(Subset.lateralAcro)[Subset.lateralAcro$section_id == sections[[i]]])
+}
+
+ST_list <- lapply(separate.subset.lateralAcro, function(x){
+                  SCTransform(x, verbose = F, vars.to.regress = c("nFeature_RNA"), return.only.var.genes = F)})
+
+spruce.features <- SelectIntegrationFeatures(object.list = ST_list, nfeatures = 25000)
+options(future.globals.maxSize = 8000 * 1024^2)
+ST_list <- PrepSCTIntegration(object.list = ST_list, anchor.features = spruce.features, verbose = FALSE)
+LOAcro.merged <- MergeSTData(ST_list[[1]], ST_list[2:length(ST_list)], merge.data = TRUE)
+
+LOAcro.merged.PCA <- RunPCA(object = LOAcro.merged, assay = "SCT", features = spruce.features) 
+LOAcro.merged.PCA.harmony <- RunHarmony(LOAcro.merged.PCA, group.by.vars ="array_id",theta = 6, plot_convergence = F, assay.use = "SCT", reduction.use = "pca", dims.use = 1:28, verbose = F)
+LOAcro.merged.PCA.harmony <- RunUMAP( object = LOAcro.merged.PCA.harmony, dims = 1:28, assay = "SCT", reduction = "harmony")
+LOAcro.merged.PCA.harmony <- FindNeighbors(object = LOAcro.merged.PCA.harmony, assay = "SCT" ,reduction = "harmony", k.param = 23, dims = 1:28)
+LOAcro.merged.PCA.harmony <- FindClusters(object = LOAcro.merged.PCA.harmony, pc.use = 1:28, resolution = 1.2, save.SNN = T, do.sparse = T)
+
+library(RColorBrewer)
+n <- 60
+qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
+
+col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
+
+umapClusters <- DimPlot(object = LOAcro.merged.PCA.harmony, reduction = "umap", cols = col_vector)
+umapTimePoint <- DimPlot(object = LOAcro.merged.PCA.harmony, reduction = "umap", group.by = "timepoint")
+
+umapClusters
+umapTimePoint
+
+#pdf(file = "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/240823_AcroAnalysis/Figures/240923_Acro_UMAP_clusters.pdf", useDingbats = F)
+#umapClusters
+#dev.off()
+#pdf(file = "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/240823_AcroAnalysis/Figures/240923_Acro_UMAP_Timepoint.pdf", useDingbats = F)
+#umapTimePoint
+#dev.off()
+
+```
+#Image processing
+```{r, fig.height=8, fig.width=15}
+
+imgs <- c(
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide2_V19T26-029_C1_AugAcro1_2.jpg",
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide2_V19T26-029_C1_AugAcro1_2.jpg",
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide2_V19T26-029_C1_AugAcro1_2.jpg",
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide2_V19T26-029_C1_AugAcro1_2.jpg",
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide6_V10F24-117_A1_AugAcro3.jpg",
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide6_V10F24-117_A1_AugAcro3.jpg",  
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide6_V10F24-117_A1_AugAcro3.jpg",  
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide6_V10F24-117_A1_AugAcro3.jpg",  
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide3_V19T26-078_C1_OctAcro1.jpg",  
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide3_V19T26-078_C1_OctAcro1.jpg",  
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide3_V19T26-078_D1_OctAcro2.jpg",  
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide3_V19T26-078_D1_OctAcro2.jpg",  
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide6_V10F24-117_D1_OctAcro3.jpg",  
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide6_V10F24-117_D1_OctAcro3.jpg",  
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide6_V10F24-117_D1_OctAcro3.jpg",  
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide2_V19T26-029_D1_SeptAcro1.jpg", 
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide2_V19T26-029_D1_SeptAcro1.jpg", 
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide2_V19T26-029_D1_SeptAcro1.jpg", 
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide2_V19T26-029_D1_SeptAcro1.jpg", 
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide4_V19T26-079_A1_SeptAcro2.jpg", 
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide4_V19T26-079_A1_SeptAcro2.jpg", 
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide4_V19T26-079_A1_SeptAcro2.jpg", 
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide4_V19T26-079_A1_SeptAcro2.jpg", 
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide4_V19T26-079_A1_SeptAcro2.jpg", 
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide4_V19T26-079_B1_SeptAcro3.jpg", 
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide4_V19T26-079_B1_SeptAcro3.jpg", 
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide4_V19T26-079_B1_SeptAcro3.jpg", 
+   "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/images/Slide4_V19T26-079_B1_SeptAcro3.jpg"
+)
+
+imgs
+
+#Check img identity before making equal to imgs
+ListImgs<-LOAcro.merged.PCA.harmony@tools$Staffli@imgs
+
+#Load the images to Staffli
+LOAcro.merged.PCA.harmony@tools$Staffli@imgs = imgs
+
+#UpdateSeuratObject(LOAcro.merged.PCA.harmony)
+
+#Load Images
+LOAcro.merged.PCA.harmony <- LoadImages(LOAcro.merged.PCA.harmony, time.resolve = FALSE)
+
+#LOAcro.merged.PCA.harmony<-SwitchResolution(LOAcro.merged.PCA.harmony, xdim = 2000)
+ImagePlot(LOAcro.merged.PCA.harmony, type = "raw")
+```
+
+```{r, fig.height=5, fig.width=6.5}
+gene.dir <-"/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/240823_AcroAnalysis/Figures/"
+
+library(dplyr)
+LOAcro.merged.PCA.harmony@meta.data <- LOAcro.merged.PCA.harmony@meta.data %>%
+  mutate(bud_names = paste(section_id, bud, sep = "_"))
+bud.names<- unique(LOAcro.merged.PCA.harmony@meta.data$bud_names)
+
+#for(name in 1:28){
+#  p <- FeatureOverlay(LOAcro.merged.PCA.harmony, features = "seurat_clusters", sampleids = name, show.sb = TRUE, pt.size = 6, pt.alpha = 6, pt.border = F, type = "raw", cols = col_vector, label.by ="bud_names")
+#  ggsave(p, filename = paste(gene.dir, "/sample", name , "_", bud.names[name], "_seuratClusters", ".pdf" ,sep = ""), dpi = 3000, width = 20, height = 20)
+#}
+
+```
+
+#Theta2 res 1.2, FindALLmarkers clusters in Seurat
+```{r}
+
+LOAcro.merged.PCA.harmony.marker <-PrepSCTFindMarkers(LOAcro.merged.PCA.harmony, assay = "SCT", verbose = TRUE)
+Markers.subcl1 <- FindAllMarkers(LOAcro.merged.PCA.harmony.marker, assay = "SCT", random.seed = 19, verbose = T)
+#396 markers
+
+# Add a new column 'marker_status' to indicate uniqueness or duplication
+Markers.subcl1$marker_status <- ifelse(duplicated(Markers.subcl1$gene) | duplicated(Markers.subcl1$gene, fromLast = TRUE),
+                                      "Duplicated", "Unique")
+
+library(writexl)
+write_xlsx(Markers.subcl1, "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/240823_AcroAnalysis/Figures/Acrocona_Markers_241103.xlsx")
+
+
+# Replace "MA-" with "MA_"
+# Markers.subcl1$gene<- gsub("MA-", "MA_", Markers.subcl1$gene)
+
+# Count the number of specific markers per cluster
+Marker_count <- table(Markers.subcl1$cluster)
+Marker_count
+
+levels(LOAcro.merged.PCA.harmony$seurat_clusters)
+new_cluster_order <- c("3", "4", "1", "2", "5", "6", "0")
+# Update the factor levels for seurat_clusters in the metadata
+LOAcro.merged.PCA.harmony$seurat_clusters <- factor(LOAcro.merged.PCA.harmony$seurat_clusters, 
+                                                    levels = new_cluster_order)
+
+top_genes_per_cluster <- Markers.subcl1 %>%
+  # Filter for positive log2 fold change values
+  filter(avg_log2FC > 0) %>%
+  # Group by the cluster column
+  group_by(cluster) %>%
+  # For each cluster, select the top 5 genes by highest log2FC
+  slice_max(order_by = avg_log2FC, n = 2) %>%
+  # Ungroup after selecting top genes
+  ungroup()
+
+# View the result
+print(top_genes_per_cluster)
+unique(top_genes_per_cluster$gene)
+
+# Set the 'cluster' column in your data frame to follow this order
+top_genes_per_cluster$cluster <- factor(top_genes_per_cluster$cluster, levels = new_cluster_order)
+# Reorder the data frame based on the new cluster order
+top_genes_per_cluster <- top_genes_per_cluster %>%
+  arrange(cluster)
+
+top_genes_per_cluster <- top_genes_per_cluster[-c(6), ]
+
+MarkerDotplot <- DotPlot(LOAcro.merged.PCA.harmony, features = top_genes_per_cluster$gene, group.by = "seurat_clusters") + coord_flip() + scale_colour_gradient2(low = "#0018a8", mid = "#ffffff", high = "#ff0031")
+
+#pdf(file = "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/240823_AcroAnalysis/Figures/240929_Acro_MarkerDotplot_top2.pdf", useDingbats = F)
+MarkerDotplot
+#dev.off()
+```
+
+# Theta2_res01.2. Convert to Monocle3 cell_data_set object ------------------------
+```{r}
+#Read in the RDS file (Seurat Object)
+cds.LOAcro.merged.PCA.harmony <- as.cell_data_set(LOAcro.merged.PCA.harmony)
+
+# to gene metdata
+fData(cds.LOAcro.merged.PCA.harmony)
+rownames(fData(cds.LOAcro.merged.PCA.harmony))[1:10]
+
+# add a gene_short_name column
+fData(cds.LOAcro.merged.PCA.harmony)$gene_short_name <- rownames(fData(cds.LOAcro.merged.PCA.harmony))
+
+cds.LOAcro.merged.PCA.harmony
+```
+
+# Subset: Input cluster and UMAP embedding from Seurat Object
+
+```{r}
+
+# 2. Cluster cells (using clustering info from Seurat's UMAP)---------------------------
+
+# assign partitions, all cells are assigned to 1 partition
+reacreate.partitionSubset <- c(rep(1,length(cds.LOAcro.merged.PCA.harmony@colData@rownames)))
+names(reacreate.partitionSubset) <- cds.LOAcro.merged.PCA.harmony@colData@rownames
+reacreate.partitionSubset <- as.factor(reacreate.partitionSubset)
+
+cds.LOAcro.merged.PCA.harmony@clusters$UMAP$partitions <- reacreate.partitionSubset
+
+# Assign the cluster info 
+
+list_clusterSubset <- LOAcro.merged.PCA.harmony@active.ident
+cds.LOAcro.merged.PCA.harmony@clusters$UMAP$clusters <- list_clusterSubset
+
+
+# Assign UMAP coordinate - cell embeddings
+cds.LOAcro.merged.PCA.harmony@int_colData@listData$reducedDims$UMAP <- LOAcro.merged.PCA.harmony@reductions$umap@cell.embeddings
+cds.LOAcro.merged.PCA.harmony
+
+# plot
+cluster.before.trajectory <- plot_cells(cds.LOAcro.merged.PCA.harmony,
+           color_cells_by = 'cluster',
+           label_groups_by_cluster = FALSE,
+           group_label_size = 5) +
+  theme(legend.position = "right")
+
+cluster.before.trajectory
+
+
+
+```
+
+
+# Subset : Recluster and Learn trajectory graph ------------------------
+```{r}
+
+# 3. Learn trajectory graph ------------------------
+cds.LOAcro.merged.PCA.harmony <- learn_graph(cds.LOAcro.merged.PCA.harmony, use_partition = FALSE, learn_graph_control = list(minimal_branch_len = 15))
+
+
+#Visualize with cluster label 
+plot_cells(cds.LOAcro.merged.PCA.harmony, color_cells_by="cluster", label_cell_groups=FALSE, label_branch_points = FALSE,
+           label_roots = TRUE,   
+           label_leaves = FALSE,
+           graph_label_size = 2.5)     
+
+
+```
+
+
+# Subset: Order cells in pseudotime
+```{r}
+# 4. Order the cells in pseudotime -------------------
+#Here I select the primordia cells as initial time point (root nodes)
+
+#Order cells, set initial point manually (Selected a location on the top, a little nick downwards. See fig 5)
+cds.LOAcro.merged.PCA.harmony <- order_cells(cds.LOAcro.merged.PCA.harmony)
+
+Trajectory_UMAP_SublateralAcro <- plot_cells(cds.LOAcro.merged.PCA.harmony,
+                                cell_size = 0.7,
+                                color_cells_by = 'pseudotime',
+                                trajectory_graph_segment_size = 2.0,
+                                label_groups_by_cluster = FALSE,
+                                label_branch_points = FALSE,
+                                label_roots = TRUE,
+                                label_leaves = FALSE,
+                                graph_label_size = 2.5,
+                              )
+# Modify the color scale using scale_color_continuous
+DimPlot_ggplot <- Trajectory_UMAP_SublateralAcro + ggplot2::theme_minimal() +
+                  ggplot2::scale_color_continuous(low = "yellow", high = "red") +
+                  ggplot2::labs(color = "Pseudotime")
+
+#pdf(file = "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/240823_AcroAnalysis/Figures/240929_Trajectory_UMAP_SublateralAcro.pdf", useDingbats = F)
+#DimPlot_ggplot
+#dev.off()
+
+head(pseudotime(cds.LOAcro.merged.PCA.harmony))
+
+#Add pseudotime data in cds
+cds.LOAcro.merged.PCA.harmony$monocle3_pseudotime <- pseudotime(cds.LOAcro.merged.PCA.harmony)
+
+#Add pseudotime in Seurat Object
+LOAcro.merged.PCA.harmony = AddMetaData(LOAcro.merged.PCA.harmony, metadata = pseudotime(cds.LOAcro.merged.PCA.harmony), col.name = "monocle3_pseudotime")
+
+#Visualise pseudotime on tissue. 
+gene.dir <-"/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/240823_AcroAnalysis/Figures/"
+
+library(dplyr)
+LOAcro.merged.PCA.harmony@meta.data <- LOAcro.merged.PCA.harmony@meta.data %>%
+  mutate(bud_names = paste(section_id, bud, sep = "_"))
+bud.names<- unique(LOAcro.merged.PCA.harmony@meta.data$bud_names)
+
+min_pseudotime <- min(LOAcro.merged.PCA.harmony$monocle3_pseudotime, na.rm = TRUE)
+max_pseudotime <- max(LOAcro.merged.PCA.harmony$monocle3_pseudotime, na.rm = TRUE)
+
+for(name in 1:28){
+  p <- FeatureOverlay(LOAcro.merged.PCA.harmony, features = "monocle3_pseudotime", sampleids = name, show.sb = TRUE, pt.size = 6, pt.alpha = 6, pt.border = F, type = "raw", cols = c("#ffff33", "#e41a1c"), label.by ="bud_names", value.scale = c(min_pseudotime, max_pseudotime))
+  ggsave(p, filename = paste(gene.dir, "/sample", name , "_", bud.names[name], "_pseudotime", ".pdf" ,sep = ""), dpi = 3000, width = 20, height = 20)
+}
+```
+
+#Save the final object
+```{r}
+saveRDS(LOAcro.merged.PCA.harmony, file = "/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/se_object_Yuvarani/LOAcro.merged.PCA.harmony_2024-11-03.rds")
+
+LOAcro.merged.PCA.harmony <- readRDS("/home/st-analysis_home/sami.saarenpaa/runs/Sybil_to_Sami/se_object_Yuvarani/LOAcro.merged.PCA.harmony_2024-11-03.rds")
+```
