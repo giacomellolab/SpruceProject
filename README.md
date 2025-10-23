@@ -50,12 +50,12 @@ docker run --rm -v $(pwd):/SpruceProject -w /SpruceProject yuvaranimasarapu/r-en
 
 The scripts are numbered in the order of analysis starting with data processing, QC, normalization, clustering, DE analysis, and lastly followed by gene expression between the bracts and scales.
 Each markdown script depends on the results from the previous one — for example:
-1_LoadData_Filtering.Rmd produces a cleaned dataset after loading the count matrices and images in R.
-2_Normalisation_filteredData.Rmd loads the cleaned (filtered) seurat object and performs normalization (SCTransform) on it.
-3_ClusterAnalysis.Rmd uses the normalized dataset, performs integration and clustering on it.
-4_Visualisation_Plots.Rmd creates plots that were used to visualize the clustering results.
-5_MarkerGene_analysis.Rmd extracts the cluster markers and performs the DE analysis.
-6_bracts_vs_scales.Rmd extracts the DE genes from the bracts and scales comparisons.
+- 1_LoadData_Filtering.Rmd produces a cleaned dataset after loading the count matrices and images in R.
+- 2_Normalisation_filteredData.Rmd loads the cleaned (filtered) seurat object and performs normalization (SCTransform) on it.
+- 3_ClusterAnalysis.Rmd uses the normalized dataset, performs integration and clustering on it.
+- 4_Visualisation_Plots.Rmd creates plots that were used to visualize the clustering results.
+- 5_MarkerGene_analysis.Rmd extracts the cluster markers and performs the DE analysis.
+- 6_bracts_vs_scales.Rmd extracts the DE genes from the bracts and scales comparisons.
 
 ## STdeconvolve
 In order to run the Rscripts for this analysis via its docker container, type the following in your terminal (within R console or terminal app).
