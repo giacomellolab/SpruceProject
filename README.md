@@ -82,6 +82,25 @@ docker run --rm -v $(pwd):/SpruceProject -w /SpruceProject <> \
   R -e "rmarkdown::render('scripts/clustering_and_BvS-analysis/2_241103_SubLatFem_reanalysis_final.Rmd', output_dir = 'results')"
 ```
 
+## ST pipeline docker
+If you want to run the [ST pipeline](https://github.com/jfnavarro/st_pipeline/tree/1.7.9) which was used in this study to convert the sequencing fastq files to genecount matrices for the other analyses, you can do so by using our docker container that contains the exact version of the ST pipeline package (v1.7.9) that was used for tha fastq files in this study.
 
+```bash
+docker pull yuvaranimasarapu/spruce-st_pipeline:1.7.9
+```
 
+And then run ST pipeline within this docker container.
+
+```bash
+docker run --rm yuvaranimasarapu/spruce-st_pipeline:1.7.9 st_pipeline_run.py -h
+```
+
+An example run with dummy 'test' experiment data with fastq files, file1.fastq and file2.fastq, would look like this.
+
+```bash
+docker run --rm -v /data:/data yuvaranimasarapu/spruce-st_pipeline:1.7.9 \
+--expName test --output-folder /data/out --ids ids_file.txt --ref-map path_to_index \
+--log-file log_file.txt --output-folder /results \
+--ref-annotation annotation_file.gtf file1.fastq file2.fastq 
+```
 
