@@ -83,7 +83,7 @@ docker run --rm -v $(pwd):/SpruceProject -w /SpruceProject <> \
 ```
 
 ## ST pipeline docker
-If you want to run the [ST pipeline](https://github.com/jfnavarro/st_pipeline/tree/1.7.9) which was used in this study to convert the sequencing fastq files to genecount matrices for the other analyses, you can do so by using our docker container that contains the exact version of the ST pipeline package (v1.7.9) that was used for tha fastq files in this study.
+If you want to run the [ST pipeline](https://github.com/jfnavarro/st_pipeline/tree/1.7.9) which was used in this study to convert the sequencing fastq files to genecount matrices for the other analyses, you can do so by using our docker container that contains the exact version of the ST pipeline package (v1.7.9) that was used for tha fastq files in this study. TAGGD and STAR (v2.7.1a) are also installed in this container which are required for ST pipeline to run.
 
 ```bash
 docker pull yuvaranimasarapu/spruce-st_pipeline:1.7.9
