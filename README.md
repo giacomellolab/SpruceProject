@@ -66,10 +66,12 @@ In order to run the Rscripts for this analysis via its docker container, type th
 
 ```bash
 docker run --rm -v $(pwd):/SpruceProject -w /SpruceProject yuvaranimasarapu/r-env-spruce:stdeconvolvev1.0 \
-  R -e "rmarkdown::render('scripts/clustering_and_BvS-analysis/<stdeconvolve.Rmd>', output_dir = 'results')" && \
-  R -e "rmarkdown::render('scripts/clustering_and_BvS-analysis/<stdeconvolve.Rmd>', output_dir = 'results')" && \
-  R -e "rmarkdown::render('scripts/clustering_and_BvS-analysis/<stdeconvolve.Rmd>', output_dir = 'results')"
+  R -e "rmarkdown::render('scripts/STdeconvolve/Combined_datasets_AcroOct_STdeconvolve.Rmd', output_dir = 'results')" && \
+  R -e "rmarkdown::render('scripts/STdeconvolve/Combined_datasets_FemOct_STdeconvolve.Rmd', output_dir = 'results')" && \
+  R -e "rmarkdown::render('scripts/STdeconvolve/Combined_datasets_VegOct_STdeconvolve.Rmd', output_dir = 'results')" && \
+  R -e "rmarkdown::render('scripts/STdeconvolve/STdeconvolve_results_interpretation.Rmd', output_dir = 'results')"
 ```
+The scripts are specific to the bud type: Female-October (FemOct), Acrocona-October (AcroOct), and Vegetative-October (VegOct). 
 
 ## Trajectory analysis
 In order to run the Rscripts for this analysis via its docker container, type the following in your terminal (within R console or terminal app). 1_241103_SubLatAcro_reanalysis_final.Rmd scripts performs trajectory analysis on the lateral organs subset from acrocona bud tissue sections. And the script 2_241103_SubLatFem_reanalysis_final.Rmd produces the results from the trajectory analysis performed on the lateral organs clusters from the female bud tissue sections.
