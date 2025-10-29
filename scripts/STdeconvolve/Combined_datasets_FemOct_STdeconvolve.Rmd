@@ -1,0 +1,330 @@
+---
+title: "Combining_datasets_STdeconvolve_SR"
+author: "Sofia Rouot"
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output: html_document
+format:
+  html:
+    code-fold: true
+    toc: true
+    number-sections: true
+    theme: spacelab
+    embed-resources: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message = FALSE, warning = FALSE}
+library(STdeconvolve)
+library(Seurat)
+library(SeuratObject)
+library(openxlsx)
+library(RColorBrewer)
+library(ggplot2)
+```
+
+
+# Spruce FemOct data
+
+Load data
+```{r}
+se_spruce <- readRDS(file = "spruce_compatible_obj.all_samples.rds")
+```
+
+```{r}
+se_spruce_Fem <- subset(x = se_spruce, subset = stage == "Fem")
+se_spruce_FemOct <- subset(x = se_spruce_Fem, subset = timepoint == "Oct")
+
+se_spruce_FemOct_list <- SplitObject(se_spruce_FemOct, split.by = "section_id")
+se_spruce_FemOct_list[[1]]@meta.data
+se_spruce_FemOct_list[[8]]@meta.data
+```
+
+## Create corpus for each section id subsetted seurat object
+N.B. The counts matrix are originally:
+  - rows = genes 
+  - columns = pixels 
+  But STdeconvolve assumes the other way:
+  - rows = pixels 
+  - columns = genes
+  
+--> Use as.matrix(t(counts)) to transpose the matrix and ensure it is treated as a matrix. 
+
+```{r}
+FemOctCorpusReps_v2 <- lapply(se_spruce_FemOct_list, function(seurat_obj) {
+  counts <- seurat_obj@assays[["Spatial"]]@counts
+  #with transpose of matrix 
+  dat <- preprocess(as.matrix(t(counts)),
+                   extractPos = FALSE,
+                   selected.genes = NA,
+                   nTopGenes = NA,
+                   genes.to.remove = NA,
+                   removeAbove = 1.1,
+                   removeBelow = 0.01,
+                   min.reads = 1,
+                   min.lib.size = 50,
+                   min.detected = 1,
+                   ODgenes = TRUE,
+                   nTopOD = 1000,
+                   od.genes.alpha = 0.05,
+                   gam.k = 5) 
+  dat
+})
+```
+
+add the x,y positions manually in the corpus 
+```{r}
+unique_section_id <- unique(se_spruce_FemOct$section_id)
+for (section_id in unique_section_id){
+  # Access your Seurat object
+  seurat_obj <- se_spruce_FemOct_list[[section_id]]
+  
+  # Step 1: Get the counts matrix and its pixel names
+  counts <- seurat_obj@assays$Spatial@counts
+  
+  # Step 2: Get the true pixel coordinates (a matrix or data.frame of x/y positions)
+  image_name <- names(se_spruce_FemOct_list[[section_id]]@images)
+  coords <- seurat_obj@images[[image_name]]@boundaries[["centroids"]]@coords
+  
+  # Make sure coords rownames match column names of counts
+  rownames(coords) <- colnames(counts)
+  
+  # Step 4: Assign coords to pos slot of corpus
+  FemOctCorpusReps_v2[[section_id]]$pos <- coords
+
+}
+
+```
+
+
+```{r}
+names(FemOctCorpusReps_v2) <- c("V10F24_109_A1_1", "V10F24_109_A1_2", "V10F24_109_A1_3", "V10F24_109_B1_1", "V10F24_109_B1_2", "V10F24_109_B1_3", "V10F24_109_C1_1", "V10F24_109_C1_2")
+```
+
+
+```{r}
+combinedFemOctgenes <- Reduce(union, list(colnames(FemOctCorpusReps_v2$V10F24_109_A1_1$corpus),
+                                       colnames(FemOctCorpusReps_v2$V10F24_109_A1_2$corpus),
+                                       colnames(FemOctCorpusReps_v2$V10F24_109_A1_3$corpus),
+                                       colnames(FemOctCorpusReps_v2$V10F24_109_B1_1$corpus),
+                                       colnames(FemOctCorpusReps_v2$V10F24_109_B1_2$corpus),
+                                       colnames(FemOctCorpusReps_v2$V10F24_109_B1_3$corpus),
+                                       colnames(FemOctCorpusReps_v2$V10F24_109_C1_1$corpus),
+                                       colnames(FemOctCorpusReps_v2$V10F24_109_C1_2$corpus))
+                           )
+length(combinedFemOctgenes)
+```
+2765
+```{r}
+unique_section_id
+```
+
+```{r}
+combinedFemOctcorpus <- dplyr::bind_rows(
+  as.data.frame(t(se_spruce_FemOct_list[["V10F24-109-A1-1"]]@assays[["Spatial"]]@counts))[rownames(FemOctCorpusReps_v2$V10F24_109_A1_1$pos),combinedFemOctgenes],
+ as.data.frame(t(se_spruce_FemOct_list[["V10F24-109-A1-2"]]@assays[["Spatial"]]@counts))[rownames(FemOctCorpusReps_v2$V10F24_109_A1_2$pos),combinedFemOctgenes],
+ as.data.frame(t(se_spruce_FemOct_list[["V10F24-109-A1-3"]]@assays[["Spatial"]]@counts))[rownames(FemOctCorpusReps_v2$V10F24_109_A1_3$pos),combinedFemOctgenes],
+ as.data.frame(t(se_spruce_FemOct_list[["V10F24-109-B1-1"]]@assays[["Spatial"]]@counts))[rownames(FemOctCorpusReps_v2$V10F24_109_B1_1$pos),combinedFemOctgenes],
+ as.data.frame(t(se_spruce_FemOct_list[["V10F24-109-B1-2"]]@assays[["Spatial"]]@counts))[rownames(FemOctCorpusReps_v2$V10F24_109_B1_2$pos),combinedFemOctgenes],
+ as.data.frame(t(se_spruce_FemOct_list[["V10F24-109-B1-3"]]@assays[["Spatial"]]@counts))[rownames(FemOctCorpusReps_v2$V10F24_109_B1_3$pos),combinedFemOctgenes],
+ as.data.frame(t(se_spruce_FemOct_list[["V10F24-109-C1-1"]]@assays[["Spatial"]]@counts))[rownames(FemOctCorpusReps_v2$V10F24_109_C1_1$pos),combinedFemOctgenes],
+ as.data.frame(t(se_spruce_FemOct_list[["V10F24-109-C1-2"]]@assays[["Spatial"]]@counts))[rownames(FemOctCorpusReps_v2$V10F24_109_C1_2$pos),combinedFemOctgenes],
+  
+  )
+
+dim(combinedFemOctcorpus)
+```
+5258 2765
+(pixels, genes)
+
+```{r}
+head(colnames(combinedFemOctcorpus)) #gene names 
+head(rownames(combinedFemOctcorpus)) #spot names
+```
+
+Save files
+```{r}
+saveRDS(combinedFemOctcorpus, file = paste0(directory, "combinedFemOctcorpus.rds"))
+saveRDS(FemOctCorpusReps_v2, file = paste0(directory, "FemOctCorpusReps.rds"))
+```
+
+## Run LDA
+K=2 took 1.30 mins
+K=9 took 12.58 mins
+K=15 29.49 mins
+K=20 44.29 mins
+```{r}
+combinedFemOctldas_K9 <- fitLDA(counts = combinedFemOctcorpus,
+                                    K = c(9),
+                                    perc.rare.thresh = 0.05,
+                                    seed = 0,
+                                    ncores = 7,
+                                    plot = TRUE)
+```
+```{r}
+optLDA_FemOct_K9 <- optimalModel(models = combinedFemOctldas_K9, opt = 9)
+combinedFemOct_results_K9 <- getBetaTheta(lda = optLDA_FemOct_K9,
+                        perc.filt = 0.05,
+                        betaScale = 1000)
+```
+
+```{r}
+write.xlsx(combinedFemOct_results_K20$theta, file = paste0(directory, "theta_matrix_FemOct_K20.xlsx"), colNames = TRUE, rowNames = TRUE)
+
+write.xlsx(combinedFemOct_results_K20$beta, file = paste0(directory, "beta_matrix_FemOct_K20.xlsx"),colNames = TRUE, rowNames = TRUE)
+
+#write.table(combinedFemOctgenes, file = paste0(directory_1, "combined_genes_all_FemOct.txt"))
+
+saveRDS(optLDA_FemOct_K20, file = paste0(directory, "optlda_K20_FemOct_all_femoct_samples.rds"))
+saveRDS(combinedFemOctldas_K20, file = paste0(directory, "lda_K20_FemOct_all_femoct_samples_perplexity__numrare_.rds"))
+```
+
+# Plot
+- without H&E 
+```{r}
+vizAllTopics(combinedFemOct_results_K20$theta[rownames(FemOctCorpusReps_v2$V10F24_109_A1_2$pos),], 
+             FemOctCorpusReps_v2$V10F24_109_A1_2$pos,
+             r = 45,
+             lwd = 0.4,
+             showLegend = TRUE,
+             plotTitle = NA)
+```
+
+Plot for all samples without tissue image
+```{r}
+# "V10F24_109_A1_1", "V10F24_109_A1_2", "V10F24_109_A1_3", "V10F24_109_B1_1", "V10F24_109_B1_2", "V10F24_109_B1_3", "V10F24_109_C1_1", "V10F24_109_C1_2"
+group_cols = brewer.pal(n = 8, name = "Dark2")  # or "Set3", "Dark2", "Paired"
+                                  
+plt <- vizAllTopics(combinedFemOct_results_K20$theta[rownames(FemOctCorpusReps_v2$V10F24_109_C1_2$pos),], 
+             FemOctCorpusReps_v2$V10F24_109_C1_2$pos,
+                 group_cols = group_cols,
+                 r = 45,
+                 lwd = 0.4,
+                 showLegend = TRUE,
+                 plotTitle = NA) +
+ggplot2::guides(fill=ggplot2::guide_legend(ncol=2)) +
+
+
+ggplot2::theme(
+  plot.background = ggplot2::element_blank()
+)
+plt
+#Save plot
+ggsave(file = paste0(directory, "plots/STdeconvolve_ALL_FemOct_20celltypes_on_V10F24_109_C1_2.pdf"), plot = plt, width = 15, height =10, dpi = 300)
+  
+
+                                  
+plt <- vizAllTopics(theta_K9[rownames(FemOctCorpusReps_v2$V10F24_109_C1_2$pos),], 
+             FemOctCorpusReps_v2$V10F24_109_C1_2$pos,
+                 group_cols = group_cols,
+                 r = 45,
+                 lwd = 0.4,
+                 showLegend = TRUE,
+                 plotTitle = NA) +
+ggplot2::guides(fill=ggplot2::guide_legend(ncol=2)) +
+
+
+ggplot2::theme(
+  plot.background = ggplot2::element_blank()
+)
+plt
+#Save plot
+ggsave(file = paste0(directory, "STdeconvolve_ALL_FemOct_9celltypes_on_V10F24_109_C1_2.pdf"), plot = plt, width = 15, height =10, dpi = 300)
+```
+
+
+## Plot per cell type
+Plot
+- without H&E 
+
+```{r}
+# vizTopic() for faster plotting. Let’s visualize each deconvolved cell-type separately:
+  ps <- lapply(colnames(combinedFemOct_results_K9$theta), function(celltype) {
+  
+  vizTopic(theta = combinedFemOct_results_K9$theta[rownames(FemOctCorpusReps_v2$V10F24_109_C1_2$pos),], 
+           pos = FemOctCorpusReps_v2$V10F24_109_C1_2$pos, 
+           topic = celltype, 
+           plotTitle = paste0("X", celltype),
+         size = 1.5, stroke = 0.5, alpha = 0.5,
+         low = "white",
+         high = "red")
+  
+})
+  ps_final <- gridExtra::grid.arrange(
+  grobs = ps,
+  layout_matrix = rbind(c(1, 2, 3, 4),
+                        c(5, 6, 7, 8),
+                        c(9, 10, 11, 12))
+)
+  # Save vizTopic plot 
+  ggsave(file =  paste0(directory, "plots/ALL_FemOct_K9_on_section_id_V10F24_109_C1_2_per_cell_type.pdf"), plot = ps_final, width = 15, height =12, dpi = 300)  
+```
+
+
+
+## Plot as an Assay to use tissue image
+Create an assay for the STdeconvolve results to be able to use the seurat functions for plotting, to visualise the results with the tissue image. Important to distinguish deconvolved cell types for bracts vs scales 
+
+Load object and the theta matrices 
+```{r}
+
+FemOct_theta_K9 <- read.xlsx("/data_analysis/Spruce_STdeconvolve_Fem_Oct/results_K_9/all_FemOct_samples/theta_matrix_FemOct.xlsx", colNames = TRUE, rowNames = TRUE)
+
+FemOct_theta_K15 <- read.xlsx("/data_analysis/Spruce_STdeconvolve_Fem_Oct/results_K_celltype_15/all_FemOct_samples/theta_matrix_FemOct.xlsx", colNames = TRUE, rowNames = TRUE)
+
+FemOct_theta_K20 <- read.xlsx("/data_analysis/Spruce_STdeconvolve_Fem_Oct/results_K_20/all_FemOct_samples/theta_matrix_FemOct_K20.xlsx", colNames = TRUE, rowNames = TRUE)
+```
+
+### Create Assay for each STdeconvolve theta matrix (K=9, 15, 20)
+```{r}
+se_spruce_FemOct@meta.data
+unique(se_spruce_FemOct$section_id) #8
+
+theta_matrix_K9 <- as.data.frame(FemOct_theta_K9)
+theta_matrix_K15 <- as.data.frame(FemOct_theta_K15)
+theta_matrix_K20 <- as.data.frame(FemOct_theta_K20)
+
+#Transpose it to get the spot pixels as columns, and the cell type number as rows
+theta_matrix_K9 <- t(theta_matrix_K9)
+theta_matrix_K15 <- t(theta_matrix_K15)
+theta_matrix_K20 <- t(theta_matrix_K20)
+
+se_spruce_FemOct[['STdeconvolve_K9']] <- CreateAssayObject(counts = theta_matrix_K9)
+se_spruce_FemOct[['STdeconvolve_K15']] <- CreateAssayObject(counts = theta_matrix_K15)
+se_spruce_FemOct[['STdeconvolve_K20']] <- CreateAssayObject(counts = theta_matrix_K20)
+
+```
+
+```{r}
+saveRDS(se_spruce_FemOct, file=("/data_analysis/Spruce_STdeconvolve_Fem_Oct/spruce_compatible_obj.FemOct_all_STdecon_theta_assays.rds"))
+```
+
+### Visualize the STdeconvolve cell types with the tissue 
+```{r}
+DefaultAssay(se_spruce_FemOct) <- "STdeconvolve_K9"
+
+celltypes <- rownames(se_spruce_FemOct@assays$STdeconvolve_K9)
+
+for (ct in celltypes){
+  plot <- SpatialFeaturePlot(se_spruce_FemOct, features = ct, alpha = 1, ncol = 3, pt.size.factor = 3) + theme(legend.position = "right")
+  ggsave(file =  paste0(directory, "plots/per_cell_type_tissue_overlay/tissue_FemOct_K9_cell_type_", ct, ".pdf"), plot = plot, width = 15, height =12, dpi = 300)
+}
+
+```
+
+
+## Session info
+
+<details>
+
+<summary>
+
+</summary>
+
+```{r}
+sessionInfo()
+Sys.Date()
+Sys.time()
+```
