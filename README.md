@@ -75,11 +75,6 @@ In order to run the Rscripts for this analysis, go to the sub-folder [trajectory
 
 The seurat objects needed to reproduce this analysis can be downloaded from our Data Mendeley repository with currently reserved [DOI:10.17632/b7fppw63v8.1](https://data.mendeley.com/preview/b7fppw63v8?a=0a093701-dffc-4dd8-bdab-bb372579088) that will be made public upon publication.
 
-```bash
-docker run --rm -v $(pwd):/SpruceProject -w /SpruceProject <> \
-  R -e "rmarkdown::render('scripts/clustering_and_BvS-analysis/1_241103_SubLatAcro_reanalysis_final.Rmd', output_dir = 'results')" && \
-  R -e "rmarkdown::render('scripts/clustering_and_BvS-analysis/2_241103_SubLatFem_reanalysis_final.Rmd', output_dir = 'results')"
-```
 
 ## ST pipeline docker
 If you want to run the [ST pipeline](https://github.com/jfnavarro/st_pipeline/tree/1.7.9) which was used in this study to convert the sequencing fastq files to genecount matrices for the other analyses, you can do so by using our docker container that contains the exact version of the ST pipeline package (v1.7.9) that was used for tha fastq files in this study. TAGGD and STAR (v2.7.1a) are also installed in this container which are required for ST pipeline to run.
