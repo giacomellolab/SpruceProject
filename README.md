@@ -26,14 +26,9 @@ For the analysis with [stdeconvolve](scripts/stdeconvolve), pull the docker envi
 docker pull yuvaranimasarapu/r-env-spruce:stdeconvolvev1.0
 ```
 
-For [trajectory analysis](scripts/trajectory_analysis), docker container for the R environment is pulled via:
-```bash
-docker pull <>
-```
-
 Now below are the steps on how to run the docker containers along with R scripts for each of the analysis.
 
-## Data
+## Raw Data
 The fastq files from the sequencing data can be extracted from the GEO project repository *GSE288244*.
 
 ## Clustering and Bracts vs Scales Analysis
@@ -64,6 +59,8 @@ Each markdown script depends on the results from the previous one — for exampl
 ## STdeconvolve
 In order to run the Rscripts for this analysis via its docker container, type the following in your terminal (within R console or terminal app).
 
+The seurat objects needed to re-run this analysis are available on our Data Mendeley repository [DOI:10.17632/b7fppw63v8.1](https://data.mendeley.com/preview/b7fppw63v8?a=0a093701-dffc-4dd8-bdab-bb372579088). Detailed descriptions of the analysis and objects are also provided in this repository.
+
 ```bash
 docker run --rm -v $(pwd):/SpruceProject -w /SpruceProject yuvaranimasarapu/r-env-spruce:stdeconvolvev1.0 \
   R -e "rmarkdown::render('scripts/clustering_and_BvS-analysis/<stdeconvolve.Rmd>', output_dir = 'results')" && \
@@ -72,7 +69,7 @@ docker run --rm -v $(pwd):/SpruceProject -w /SpruceProject yuvaranimasarapu/r-en
 ```
 
 ## Trajectory analysis
-In order to run the Rscripts for this analysis via its docker container, type the following in your terminal (within R console or terminal app). 1_241103_SubLatAcro_reanalysis_final.Rmd scripts performs trajectory analysis on the lateral organs subset from acrocona bud tissue sections. And the script 2_241103_SubLatFem_reanalysis_final.Rmd produces the results from the trajectory analysis performed on the lateral organs clusters from the female bud tissue sections.
+In order to run the Rscripts for this analysis, go to the sub-folder [trajectory_analysis](scripts/trajectory_analysis) under scripts and run the markdown files present there. [1_241103_SubLatAcro_reanalysis_final.Rmd](scripts/trajectory_analysis/1_241103_SubLatAcro_reanalysis_final.Rmd) scripts performs trajectory analysis on the lateral organs subset from acrocona bud tissue sections. And the script [2_241103_SubLatFem_reanalysis_final.Rmd](scripts/trajectory_analysis/2_241103_SubLatFem_reanalysis_final.Rmd) produces the results from the trajectory analysis performed on the lateral organs clusters from the female bud tissue sections.
 
 The seurat objects needed to reproduce this analysis can be downloaded from our Data Mendeley repository with currently reserved [DOI:10.17632/b7fppw63v8.1](https://data.mendeley.com/preview/b7fppw63v8?a=0a093701-dffc-4dd8-bdab-bb372579088) that will be made public upon publication.
 
@@ -104,3 +101,5 @@ docker run --rm -v /data:/data yuvaranimasarapu/r-env-spruce:st_pipeline1.7.9 \
 --ref-annotation annotation_file.gtf file1.fastq file2.fastq 
 ```
 
+## DAPseq data 
+To run the processing and analysis pipeline for the DAPseq experiments performed on the SPL1 TF in Norway spruce, go to GitHub repository [DAPseq_SPL1_spruce](https://github.com/TeiturAK/DAPseq_SPL1_spruce) where complete details to run the analyis as well as the required scripts are provided.
