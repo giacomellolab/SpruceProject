@@ -1,0 +1,372 @@
+---
+title: "Combining_datasets_STdeconvolve_SR"
+author: "Sofia Rouot"
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output: html_document
+format:
+  html:
+    code-fold: true
+    toc: true
+    number-sections: true
+    theme: spacelab
+    embed-resources: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message = FALSE, warning = FALSE}
+library(STdeconvolve)
+library(Seurat)
+library(SeuratObject)
+library(openxlsx)
+library(RColorBrewer)
+library(ggplot2)
+```
+
+
+# Spruce VegOct data
+
+Load data
+```{r}
+se_spruce <- readRDS(file = "spruce_compatible_obj.all_samples.rds")
+```
+
+```{r}
+se_spruce@meta.data
+se_spruce.unique.samples <- unique(se_spruce$section_id)
+se_spruce.unique.samples 
+length(se_spruce.unique.samples) #88
+
+se_spruce.unique.stages <- unique(se_spruce$bud)
+se_spruce.unique.stages
+length(se_spruce.unique.stages) #29 unique bud stages
+```
+
+Split for the Veg stage
+```{r}
+se_spruce_Veg <- subset(x = se_spruce, subset = stage == "Veg")
+```
+
+```{r}
+length(unique(se_spruce_Veg$section_id))
+```
+37 section ids of Veg 
+
+```{r}
+length(unique(se_spruce_Veg$bud))
+q <-unique(se_spruce_Veg$bud)
+q
+```
+
+11 Veg buds (OctVeg1 etc)
+
+
+Split for the October timepoint
+```{r}
+se_spruce_VegOct <- subset(x = se_spruce_Veg, subset = timepoint == "Oct")
+se_spruce_VegOct@meta.data
+
+unique(se_spruce_VegOct$timepoint)
+```
+
+Biological replicates
+```{r}
+unique(se_spruce_VegOct$bud)
+```
+3 biological replicates: "OctVeg3" "OctVeg1" "OctVeg2"
+
+Technical replicates 
+```{r}
+unique(se_spruce_VegOct$section_id)
+```
+9 section ids : "V10F24-117-C1-1" "V10F24-117-C1-2" "V10F24-117-C1-3" "V19T26-078-A1-1" "V19T26-078-A1-2" "V19T26-078-A1-3"
+"V19T26-078-B1-1" "V19T26-078-B1-2" "V19T26-078-B1-3"
+
+
+Split into a list of section ids 
+```{r}
+se_spruce_VegOct_list <- SplitObject(se_spruce_VegOct, split.by = "section_id")
+se_spruce_VegOct_list[[1]]@meta.data
+se_spruce_VegOct_list[[9]]@meta.data
+```
+
+## Create corpus for each section id subsetted seurat object
+N.B. The counts matrix are originally:
+  - rows = genes 
+  - columns = pixels 
+  But STdeconvolve assumes the other way:
+  - rows = pixels 
+  - columns = genes
+  
+--> Use as.matrix(t(counts)) to transpose the matrix and ensure it is treated as a matrix. 
+```{r}
+VegOctCorpusReps_v2 <- lapply(se_spruce_VegOct_list, function(seurat_obj) {
+  counts <- seurat_obj@assays[["Spatial"]]@counts
+  #with transpose of matrix 
+  dat <- preprocess(as.matrix(t(counts)),
+                   extractPos = FALSE,
+                   selected.genes = NA,
+                   nTopGenes = NA,
+                   genes.to.remove = NA,
+                   removeAbove = 1.1,
+                   removeBelow = 0.01,
+                   min.reads = 1,
+                   min.lib.size = 50,
+                   min.detected = 1,
+                   ODgenes = TRUE,
+                   nTopOD = 1000,
+                   od.genes.alpha = 0.05,
+                   gam.k = 5) 
+  dat
+})
+```
+
+Add the x,y positions manually in the corpus 
+```{r}
+unique_section_id <- unique(se_spruce_VegOct$section_id)
+for (section_id in unique_section_id){
+  # Access your Seurat object
+  seurat_obj <- se_spruce_VegOct_list[[section_id]]
+  
+  # Step 1: Get the counts matrix and its pixel names
+  counts <- seurat_obj@assays$Spatial@counts
+  
+  # Step 2: Get the true pixel coordinates (a matrix or data.frame of x/y positions)
+  image_name <- names(se_spruce_VegOct_list[[section_id]]@images)
+  coords <- seurat_obj@images[[image_name]]@boundaries[["centroids"]]@coords
+  
+  # Make sure coords rownames match column names of counts
+  rownames(coords) <- colnames(counts)
+  
+  # Step 4: Assign coords to pos slot of corpus
+  VegOctCorpusReps_v2[[section_id]]$pos <- coords
+
+}
+
+```
+
+Replace "-" with "_"
+```{r}
+names(VegOctCorpusReps_v2) <- c("V10F24_117_C1_1", "V10F24_117_C1_2", "V10F24_117_C1_3", "V19T26_078_A1_1", "V19T26_078_A1_2", "V19T26_078_A1_3", "V19T26_078_B1_1", "V19T26_078_B1_2", "V19T26_078_B1_3")
+```
+
+
+```{r}
+combinedVegOctgenes <- Reduce(union, list(colnames(VegOctCorpusReps_v2$V10F24_117_C1_1$corpus),
+                                       colnames(VegOctCorpusReps_v2$V10F24_117_C1_2$corpus),
+                                       colnames(VegOctCorpusReps_v2$V10F24_117_C1_3$corpus),
+                                       colnames(VegOctCorpusReps_v2$V19T26_078_A1_1$corpus),
+                                       colnames(VegOctCorpusReps_v2$V19T26_078_A1_2$corpus),
+                                       colnames(VegOctCorpusReps_v2$V19T26_078_A1_3$corpus),
+                                       colnames(VegOctCorpusReps_v2$V19T26_078_B1_1$corpus),
+                                       colnames(VegOctCorpusReps_v2$V19T26_078_B1_2$corpus),
+                                       colnames(VegOctCorpusReps_v2$V19T26_078_B1_3$corpus))
+                           )
+length(combinedVegOctgenes)
+```
+3340 combined genes used for STdeconvolve of VegOct samples
+
+```{r}
+unique_section_id
+```
+
+Create the combined corpus with these 3340 genes and the (x.y) positions of each section_id 
+```{r}
+combinedVegOctcorpus <- dplyr::bind_rows(
+  as.data.frame(t(se_spruce_VegOct_list[["V10F24-117-C1-1"]]@assays[["Spatial"]]@counts))[rownames(VegOctCorpusReps_v2$V10F24_117_C1_1$pos),combinedVegOctgenes],
+ as.data.frame(t(se_spruce_VegOct_list[["V10F24-117-C1-2"]]@assays[["Spatial"]]@counts))[rownames(VegOctCorpusReps_v2$V10F24_117_C1_2$pos),combinedVegOctgenes],
+ as.data.frame(t(se_spruce_VegOct_list[["V10F24-117-C1-3"]]@assays[["Spatial"]]@counts))[rownames(VegOctCorpusReps_v2$V10F24_117_C1_3$pos),combinedVegOctgenes],
+ as.data.frame(t(se_spruce_VegOct_list[["V19T26-078-A1-1"]]@assays[["Spatial"]]@counts))[rownames(VegOctCorpusReps_v2$V19T26_078_A1_1$pos),combinedVegOctgenes],
+ as.data.frame(t(se_spruce_VegOct_list[["V19T26-078-A1-2"]]@assays[["Spatial"]]@counts))[rownames(VegOctCorpusReps_v2$V19T26_078_A1_2$pos),combinedVegOctgenes],
+ as.data.frame(t(se_spruce_VegOct_list[["V19T26-078-A1-3"]]@assays[["Spatial"]]@counts))[rownames(VegOctCorpusReps_v2$V19T26_078_A1_3$pos),combinedVegOctgenes],
+ as.data.frame(t(se_spruce_VegOct_list[["V19T26-078-B1-1"]]@assays[["Spatial"]]@counts))[rownames(VegOctCorpusReps_v2$V19T26_078_B1_1$pos),combinedVegOctgenes],
+ as.data.frame(t(se_spruce_VegOct_list[["V19T26-078-B1-2"]]@assays[["Spatial"]]@counts))[rownames(VegOctCorpusReps_v2$V19T26_078_B1_2$pos),combinedVegOctgenes],
+  as.data.frame(t(se_spruce_VegOct_list[["V19T26-078-B1-3"]]@assays[["Spatial"]]@counts))[rownames(VegOctCorpusReps_v2$V19T26_078_B1_3$pos),combinedVegOctgenes],
+ 
+  )
+
+dim(combinedVegOctcorpus)
+```
+3319, 3340
+(pixels, genes)
+
+Check:
+```{r}
+head(colnames(combinedVegOctcorpus)) #gene names 
+head(rownames(combinedVegOctcorpus)) #spot names
+```
+
+Save files
+```{r}
+saveRDS(combinedVegOctcorpus, file = paste0(directory, "combinedVegOctcorpus_20250815.rds"))
+saveRDS(VegOctCorpusReps_v2, file = paste0(directory, "VegOctCorpusReplicates.rds"))
+```
+
+## Run LDA of STdeconvolve with a given K 
+
+K=9 took 8.47 mins
+K=11 13.76 mins
+K=15 21.09 mins 
+K=20 28.38 mins
+```{r}
+combinedVegOctldas_K11 <- fitLDA(counts = combinedVegOctcorpus,
+                                    K = c(11),
+                                    perc.rare.thresh = 0.05,
+                                    seed = 0,
+                                    ncores = 7,
+                                    plot = TRUE)
+```
+
+Retrieve the beta and theta matrices
+```{r}
+optLDA_VegOct_K11 <- optimalModel(models = combinedVegOctldas_K11, opt = 11)
+combinedVegOct_results_K11 <- getBetaTheta(lda = optLDA_VegOct_K11,
+                        perc.filt = 0.05,
+                        betaScale = 1000)
+```
+
+Save results
+```{r}
+write.xlsx(combinedVegOct_results_K11$theta, file = paste0(directory, "theta_matrix_VegOct_K11.xlsx"), colNames = TRUE, rowNames = TRUE)
+
+write.xlsx(combinedVegOct_results_K11$beta, file = paste0(directory, "beta_matrix_VegOct_K11.xlsx"),colNames = TRUE, rowNames = TRUE)
+
+#write.table(combinedVegOctgenes, file = paste0(directory_1, "combined_genes_3340_all_VegOct.txt"))
+```
+
+
+```{r}
+saveRDS(optLDA_VegOct_K11, file = paste0(directory, "optLDA_VegOct_K11_all_samples.rds"))
+saveRDS(combinedVegOctldas_K11, file = paste0(directory, "combinedVegOct_ldas_K11_all_samples_perplexity_156_numrare_2.rds"))
+```
+
+# Plot
+- without H&E 
+
+[1] "V10F24-117-C1-1" "V10F24-117-C1-2" "V10F24-117-C1-3" "V19T26-078-A1-1" "V19T26-078-A1-2" "V19T26-078-A1-3"
+[7] "V19T26-078-B1-1" "V19T26-078-B1-2" "V19T26-078-B1-3"
+
+```{r}
+vizAllTopics(combinedVegOct_results_K11$theta[rownames(VegOctCorpusReps_v2$V10F24_117_C1_1$pos),], 
+             VegOctCorpusReps_v2$V10F24_117_C1_1$pos,
+             r = 45,
+             lwd = 0.4,
+             showLegend = TRUE,
+             plotTitle = NA)
+```
+
+Plot for all samples without tissue image
+```{r}
+# "V10F24_117_C1_1", "V10F24_117_C1_2", "V10F24_117_C1_3", "V19T26_078_A1_1", "V19T26_078_A1_2", "V19T26_078_A1_3", "V19T26_078_B1_1", "V19T26_078_B1_2", "V19T26_078_B1_3"
+
+group_cols = brewer.pal(n = 8, name = "Dark2")  # or "Set3", "Dark2", "Paired"
+                                  
+plt <- vizAllTopics(combinedVegOct_results_K11$theta[rownames(VegOctCorpusReps_v2$V19T26_078_B1_3$pos),], 
+             VegOctCorpusReps_v2$V19T26_078_B1_3$pos,
+                 group_cols = group_cols,
+                 r = 45,
+                 lwd = 0.4,
+                 showLegend = TRUE,
+                 plotTitle = NA) +
+ggplot2::guides(fill=ggplot2::guide_legend(ncol=2)) +
+
+ggplot2::theme(
+  plot.background = ggplot2::element_blank()
+)
+
+plt
+
+#Save plot
+ggsave(file = paste0(directory, "plots/STdeconvolve_ALL_VegOct_11celltypes_on_V19T26_078_B1_3.pdf"), plot = plt, width = 15, height =10, dpi = 300)
+```
+
+
+## Plot per cell type
+Plot
+- without H&E 
+
+```{r}
+# "V10F24_117_C1_1", "V10F24_117_C1_2", "V10F24_117_C1_3", "V19T26_078_A1_1", "V19T26_078_A1_2", "V19T26_078_A1_3", "V19T26_078_B1_1", "V19T26_078_B1_2", "V19T26_078_B1_3"
+
+# vizTopic() for faster plotting. Let’s visualize each deconvolved cell-type separately:
+  ps <- lapply(colnames(combinedVegOct_results_K11$theta), function(celltype) {
+  
+  vizTopic(theta = combinedVegOct_results_K11$theta[rownames(VegOctCorpusReps_v2$V19T26_078_B1_3$pos),], 
+           pos = VegOctCorpusReps_v2$V19T26_078_B1_3$pos, 
+           topic = celltype, 
+           plotTitle = paste0("X", celltype),
+         size = 1.5, stroke = 0.5, alpha = 0.5,
+         low = "white",
+         high = "red")
+  
+})
+  ps_final <- gridExtra::grid.arrange(
+  grobs = ps,
+  layout_matrix = rbind(c(1, 2, 3, 4),
+                        c(5, 6, 7, 8),
+                        c(9, 10, 11, 12))
+)
+  # Save vizTopic plot 
+  ggsave(file =  paste0(directory, "plots/per_celltype/ALL_VegOct_K11_on_section_id_V19T26_078_B1_3_per_cell_type.pdf"), plot = ps_final, width = 15, height =12, dpi = 300)  
+```
+
+
+## Plot as an Assay to use tissue image
+Create an assay for the STdeconvolve results to be able to use the seurat functions for plotting, to visualise the results with the tissue image. Important to distinguish deconvolved cell types for bracts vs scales 
+
+```{r}
+#se_spruce_VegOct@meta.data
+se_spruce_VegOct@meta.data
+
+theta_matrix <- as.data.frame(combinedVegOct_results_K20$theta)
+#rownames(theta_matrix) <- gsub("_", "-", rownames(theta_matrix)) do not use
+
+theta_matrix_K9 <- as.data.frame(combinedVegOct_results_K9$theta)
+theta_matrix_K15 <- as.data.frame(combinedVegOct_results_K15$theta)
+
+theta_matrix_K11 <- as.data.frame(combinedVegOct_results_K11$theta)
+
+#Transpose it to get the spot pixels as columns, and the cell type number as rows
+theta_matrix <- t(theta_matrix)
+theta_matrix_K9 <- t(theta_matrix_K9)
+theta_matrix_K15 <- t(theta_matrix_K15)
+theta_matrix_K11 <- t(theta_matrix_K11)
+
+se_spruce_VegOct[['STdeconvolve_K20']] <- CreateAssayObject(counts = theta_matrix)
+se_spruce_VegOct[['STdeconvolve_K9']] <- CreateAssayObject(counts = theta_matrix_K9)
+se_spruce_VegOct[['STdeconvolve_K15']] <- CreateAssayObject(counts = theta_matrix_K15)
+se_spruce_VegOct[['STdeconvolve_K11']] <- CreateAssayObject(counts = theta_matrix_K11)
+```
+
+```{r}
+saveRDS(se_spruce_VegOct, file=("/data_analysis/Spruce_STdeconvolve_Veg_Oct/spruce_compatible_obj.VegOct_all_STdecon_theta_assays.rds"))
+```
+
+```{r}
+DefaultAssay(se_spruce_VegOct_assays) <- "STdeconvolve_K11"
+
+celltypes <- rownames(se_spruce_VegOct_assays@assays$STdeconvolve_K11)
+
+for (ct in celltypes){
+  plot <- SpatialFeaturePlot(se_spruce_VegOct_assays, features = ct, alpha = 1, ncol = 3, pt.size.factor = 3) + theme(legend.position = "right")
+  ggsave(file =  paste0(directory, "plots/per_celltype/tissue_overlay/tissue_VegOct_K11_cell_type_", ct, ".pdf"), plot = plot, width = 15, height =12, dpi = 300)
+}
+
+```
+
+
+## Session info
+
+<details>
+
+<summary>
+
+</summary>
+
+```{r}
+sessionInfo()
+Sys.Date()
+Sys.time()
+```
