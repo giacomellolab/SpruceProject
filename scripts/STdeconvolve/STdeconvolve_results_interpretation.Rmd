@@ -1,0 +1,1118 @@
+---
+title: "STdeconvolve_Results_Interpretation_Spruce_SR"
+author: "Sofia Rouot"
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output: html_document
+format:
+  html:
+    code-fold: true
+    toc: true
+    number-sections: true
+    theme: spacelab
+    embed-resources: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message = FALSE, warning = FALSE}
+library(STdeconvolve)
+library(Seurat)
+library(SeuratObject)
+library(openxlsx)
+library(RColorBrewer)
+library(ggplot2)
+library(ggridges)
+library(tidyverse)
+library(dplyr)
+library(readxl)
+library(pheatmap)
+library(grid)
+```
+
+
+### Load input data (deconProp/beta matrix from K=15 for FemOct)
+
+FemOct
+```{r}
+FemOct_beta_K15 <- read.xlsx("/data_analysis/Spruce_STdeconvolve_Fem_Oct/results_K_celltype_15/all_FemOct_samples/beta_matrix_FemOct.xlsx", colNames = TRUE, rowNames = TRUE)
+```
+
+AcroOct
+```{r}
+AcroOct_beta_K20 <- read.xlsx("/data_analysis/Spruce_STdeconvolve_Acr_Oct/results/results_K_20/all_AcroOct_samples/beta_matrix_AroOct_K20.xlsx", colNames = TRUE, rowNames = TRUE)
+
+AcroOct_theta_K20 <- read.xlsx("data_analysis/Spruce_STdeconvolve_Acr_Oct/results/results_K_20/all_AcroOct_samples/theta_matrix_AcroOct_K20.xlsx", colNames = TRUE, rowNames = TRUE)
+```
+
+VegOct 
+```{r}
+VegOct_beta_K <- read.xlsx("/data_analysis/Spruce_STdeconvolve_Veg_Oct/K11/all_VegOct_samples/beta_matrix_VegOct_K11.xlsx", colNames = TRUE, rowNames = TRUE)
+```
+
+### 1. Extract the top gene markers from each cell type into a dataframe 
+
+Latest version with Log2FC for Fem, Veg, Acro
+LOG2FC > 0.25
+```{r}
+#Fem
+deconGexp <- data.frame(FemOct_beta_K15)
+# Ensure matrix is numeric
+deconGexp <- as.matrix(sapply(deconGexp, as.numeric))
+rownames(deconGexp) <- 1:nrow(deconGexp)
+
+#Acro
+deconGexp <- data.frame(AcroOct_beta_K20)
+# Ensure matrix is numeric
+deconGexp <- as.matrix(sapply(deconGexp, as.numeric))
+rownames(deconGexp) <- 1:nrow(deconGexp)
+
+#Veg
+deconGexp <- data.frame(VegOct_beta_K)
+deconGexp <- as.matrix(sapply(deconGexp, as.numeric))
+rownames(deconGexp) <- 1:nrow(deconGexp)
+
+
+top_markers_A <- lapply(1:nrow(deconGexp), function(cell_idx) {
+  
+  # Select genes highly expressed in this cell type
+  highgexp_idx <- which(deconGexp[cell_idx, ] > 0.5)
+  
+  if (length(highgexp_idx) == 0) return(NULL)  # skip if none pass threshold
+  
+  # Get gene names for those indices
+  highgexp_genes <- colnames(deconGexp)[highgexp_idx]
+  
+  ## high log2(fold-change) compared to other deconvolved cell-types
+  log2fc <- log2(
+    deconGexp[cell_idx, highgexp_idx, drop=TRUE] /
+      colMeans(deconGexp[-cell_idx, highgexp_idx, drop=FALSE])
+  )
+  names(log2fc) <- highgexp_genes
+  
+    # Keep only  log2FC > 0.25
+  log2fc <- log2fc[log2fc > 0.25]
+  if (length(log2fc) == 0) return(NA)  # skip if none are positive
+  
+  # Sort and take top 50
+  log2fc_sorted <- sort(log2fc, decreasing=TRUE)
+  top50 <- head(log2fc_sorted, 50)
+  
+  # Return as data frame with ranking
+  data.frame(
+    cell_type = rownames(deconGexp)[cell_idx],
+    gene = names(log2fc_sorted), #top50 or log2fc_sorted
+    log2FC = as.numeric(log2fc_sorted), #top50 or log2fc_sorted
+    rank = seq_along(log2fc_sorted), #top50 or log2fc_sorted
+    stringsAsFactors = FALSE
+  )
+})
+
+# Combine all into one data frame
+top_markers_A_df <- bind_rows(top_markers_A)
+```
+
+
+```{r}
+#Save
+directory <- "/data_analysis/Results_Interpretation/marker_genes_all/"
+write.xlsx(top_markers_Fem_df, file = paste0(directory, "FemOct_K15_all_gene_markers_log2FC.xlsx"),colNames = TRUE, rowNames = TRUE)
+
+write.xlsx(top_markers_Veg_df, file = paste0(directory, "VegOct_K11_all_gene_markers_log2FC.xlsx"),colNames = TRUE, rowNames = TRUE)
+
+write.xlsx(top_markers_A_df, file = paste0(directory, "AcroOct_K20_all_gene_markers_log2FC.xlsx"),colNames = TRUE, rowNames = TRUE)
+
+```
+
+Plot log2fc distributions per cell type
+```{r}
+# Check the actual labels
+#unique(top_markers_Fem_df$cell_type)
+
+cell_order <- c(1:20)
+top_markers_df$cell_type <- factor(top_markers_df$cell_type, levels = cell_order)
+
+p_vln_box <- ggplot(top_markers_df, aes(x = cell_type, y = log2FC, fill = cell_type)) +
+  geom_violin(trim = FALSE, alpha = 0.5) +
+  geom_boxplot(width = 0.1, outlier.shape = NA) +
+  theme_minimal(base_size = 14) +
+  scale_y_continuous(breaks = seq(0, max(top_markers_df$log2FC), by = 1)) +
+  labs(
+    title = "Distribution of log2FC values per AcroOct cell type (violin + boxplot)",
+    x = "Cell type",
+    y = "log2FC"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+p_vln_box
+
+p_ridge <- ggplot(top_markers_df, aes(x = log2FC, y = cell_type, fill = cell_type)) +
+  geom_density_ridges(alpha = 0.7, scale = 1.2) +
+  theme_minimal(base_size = 14) +
+  scale_x_continuous(breaks = seq(0, max(top_markers_df$log2FC), by = 1)) +
+  labs(
+    title = "Density of log2FC values per AcroOct cell type (ridge)",
+    x = "log2FC",
+    y = "Cell type"
+  ) +
+  theme(legend.position = "none")
+
+p_ridge
+
+p_final <- p_vln_box / p_ridge
+p_final
+
+directory <- "/data_analysis/Results_Interpretation/top50_gene_markers_per_celltype/log2fc_distribution_plots/"
+ggsave(file = paste0(directory, "plot_log2FC_distribution_top50_gene_markers_per_AcroOct_celltypes.pdf"), plot = p_final, width = 15, height =10, dpi = 300)
+
+ggplot(top_markers_df, aes(x = cell_type, y = log2FC, fill = cell_type)) +
+  geom_boxplot(outlier.alpha = 0.3) +
+  facet_wrap(~cell_type, scales = "free_x") +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Distribution of log2FC values per cell type (top 50 markers)",
+    x = "Cell type",
+    y = "log2FC"
+  ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "none",
+    strip.text = element_text(size = 12)
+  )
+
+```
+
+
+### 2. Compute overlap between Fem15 and Acro20
+Between each cell type of the top markers of FemOct and AcroOct, compute overlap of similar genes 
+
+Read top markers files if needed
+```{r}
+sheets <- excel_sheets("/data_analysis/Results_Interpretation/top50_gene_markers_per_celltype/FemOct_K15_top50_gene_markers.xlsx")
+
+# Read each sheet into a list
+top_markers_FemOct_list <- lapply(sheets, function(sheet) {
+  read.xlsx("/data_analysis/Results_Interpretation/top50_gene_markers_per_celltype/FemOct_K15_top50_gene_markers.xlsx", colNames = FALSE, sheet = sheet)
+})
+
+# Name the list by sheet names
+names(top_markers_FemOct_list) <- sheets
+
+
+
+sheets <- excel_sheets("/data_analysis/Results_Interpretation/top50_gene_markers_per_celltype/AcroOct_K20_top50_gene_markers.xlsx")
+
+## For Acro
+# Read each sheet into a list
+top_markers_AcroOct_list <- lapply(sheets, function(sheet) {
+  read.xlsx("/data_analysis/Results_Interpretation/top50_gene_markers_per_celltype/AcroOct_K20_top50_gene_markers.xlsx", colNames = FALSE, sheet = sheet)
+})
+
+# Name the list by sheet names
+names(top_markers_AcroOct_list) <- sheets
+
+
+## For Veg
+sheets <- excel_sheets("/data_analysis/Results_Interpretation/top50_gene_markers_per_celltype/VegOct_K11_top50_gene_markers.xlsx")
+# Read each sheet into a list
+top_markers_VegOct_list <- lapply(sheets, function(sheet) {
+  read.xlsx("/data_analysis/Results_Interpretation/top50_gene_markers_per_celltype/VegOct_K11_top50_gene_markers.xlsx", colNames = FALSE, sheet = sheet)
+})
+
+# Name the list by sheet names
+names(top_markers_VegOct_list) <- sheets
+
+```
+
+For high overlap, visualize those cell types to see if spatial expression is similar as well.
+
+### 3. Compute overlap between Fem15 and Veg11 (heatmap)
+
+Add annotations to the heatmap 
+```{r}
+
+top_markers_FemOct <- as.data.frame(top_markers_FemOct_list)
+#names(top_markers_FemOct) <- paste0("Fem_CellType_", 1:15)
+top_markers_VegOct <- as.data.frame(top_markers_VegOct_list)
+#names(top_markers_VegOct) <- paste0("Veg_CellType_", 1:11)
+#top_markers_AcroOct <- as.data.frame(top_markers_AcroOct_list)
+names(top_markers_AcroOct) <- paste0("Acro_CellType_", 1:20)
+
+#Add cell type annotation 
+FemOct_annot <- c("Fem_CellType_1"="Fem_1_Pith bottom", 
+                  "Fem_CellType_2"="Fem_2_Vasculature", 
+                  "Fem_CellType_3"="Fem_3_LOs-bracts",
+                  "Fem_CellType_4"="Fem_4_Meristem top",
+                  "Fem_CellType_5"="Fem_5_LOs-scales",
+                  "Fem_CellType_6"="Fem_6_LOs towards vasculature",
+                  "Fem_CellType_7"="Fem_7_Vasculature towards LOs-scales",
+                  "Fem_CellType_8"="Fem_8_LO-scales",
+                  "Fem_CellType_9"="Fem_9_LOs-vasculature-towards scales ",
+                  "Fem_CellType_10"="Fem_10_LOs-scales",
+                  "Fem_CellType_11"="Fem_11_Pith middle",
+                  "Fem_CellType_12"="Fem_12_Pith middle top",
+                  "Fem_CellType_13"="Fem_13_Meristem-pith-vasculature and LOs",
+                  "Fem_CellType_14"="Fem_14_Meristem-scales with meristematic cells",
+                  "Fem_CellType_15"="Fem_15_LOs bracts")
+
+names(top_markers_FemOct) <- FemOct_annot[names(top_markers_FemOct)]
+
+VegOct_annot <- c("Veg_CellType_1"="Veg_1_Meristem-top LOs", 
+                  "Veg_CellType_2"="Veg_2_Vasculature-LOs", 
+                  "Veg_CellType_3"="Veg_3_Pith bottom-lowest LOs",
+                  "Veg_CellType_4"="Veg_4_LOs",
+                  "Veg_CellType_5"="Veg_5_Pith bottom",
+                  "Veg_CellType_6"="Veg_6_LOs bottom",
+                  "Veg_CellType_7"="Veg_7_LOs top",
+                  "Veg_CellType_8"="Veg_8_Vasculature bottom",
+                  "Veg_CellType_9"="Veg_9_Pith middle",
+                  "Veg_CellType_10"="Veg_10_LOs-vasculature",
+                  "Veg_CellType_11"="Veg_11_Pith top")
+names(top_markers_VegOct) <- VegOct_annot[names(top_markers_VegOct)]
+
+
+AcroOct_annot <- c("Acro_CellType_1"="Acro_1_Vasculature-LOs", 
+                  "Acro_CellType_2"="Acro_2_Pith", 
+                  "Acro_CellType_3"="Acro_3_Vasculature-LOs top",
+                  "Acro_CellType_4"="Acro_4_LOs bottom",
+                  "Acro_CellType_5"="Acro_5_LOs top-scales",
+                  "Acro_CellType_6"="Acro_6_Bottom pith-LOs",
+                  "Acro_CellType_7"="Acro_7_Pith bottom",
+                  "Acro_CellType_8"="Acro_8_Meristem-vasculature and scales",
+                  "Acro_CellType_9"="Acro_9_Pith bottom middle",
+                  "Acro_CellType_10"="Acro_10_Meristem-scales",
+                  "Acro_CellType_11"="Acro_11_LOs top",
+                  "Acro_CellType_12"="Acro_12_LOs",
+                  "Acro_CellType_13"="Acro_13_Pith-LOs",
+                  "Acro_CellType_14"="Acro_14_Vasculature-LOs bottom",
+                  "Acro_CellType_15"="Acro_15_Pith top",
+                  "Acro_CellType_16"="Acro_16_LOs bottom",
+                  "Acro_CellType_17"="Acro_17_Pith top middle",
+                  "Acro_CellType_18"="Acro_18_LOs top middle (transition zone)-vaculature-scales",
+                  "Acro_CellType_19"="Acro_19_LOs top middle (transition zone)-bracts",
+                  "Acro_CellType_20"="Acro_20_Pith top middle")
+names(top_markers_AcroOct) <- AcroOct_annot[names(top_markers_AcroOct)]
+```
+
+
+```{r}
+#Fem
+top_markers_Fem_list <- lapply(top_markers_Fem, function(df) df$gene)
+names(top_markers_Fem_list) <- paste0("Fem_CellType_", 1:15)
+str(top_markers_Fem_list)
+names(top_markers_Fem_list) <- FemOct_annot[names(top_markers_Fem_list)]
+top_markers_FemOct <- top_markers_Fem_list
+
+#Acro
+top_markers_Acro_list <- lapply(top_markers_Acro, function(df) df$gene)
+names(top_markers_Acro_list) <- paste0("Acro_CellType_", 1:20)
+str(top_markers_Acro_list)
+names(top_markers_Acro_list) <- AcroOct_annot[names(top_markers_Acro_list)]
+top_markers_AcroOct <- top_markers_Acro_list
+
+#Veg
+top_markers_Veg_list <- lapply(top_markers_Veg, function(df) df$gene)
+names(top_markers_Veg_list) <- paste0("Veg_CellType_", 1:11)
+str(top_markers_Veg_list)
+names(top_markers_Veg_list) <- VegOct_annot[names(top_markers_Veg_list)]
+top_markers_VegOct <- top_markers_Veg_list
+```
+
+
+```{r}
+# Compute overlap matrix (15 × 20)
+overlap_matrix <- matrix(0, 
+                         nrow = length(top_markers_FemOct), 
+                         ncol = length(top_markers_VegOct),
+                         dimnames = list(names(top_markers_FemOct), 
+                                         names(top_markers_VegOct)))
+
+for (f_ct in names(top_markers_FemOct)) {
+  for (a_ct in names(top_markers_VegOct)) {
+    
+    common_genes <- intersect(top_markers_FemOct[[f_ct]], 
+                              top_markers_VegOct[[a_ct]])
+    
+    overlap_matrix[f_ct, a_ct] <- length(common_genes) / 50 * 100
+  }
+}
+
+write.xlsx(overlap_matrix, file = paste0(directory, "heatmaps/heatmap_overlap_Fem_Veg/overlap_matrix_top50_gene_markers_FemOct_vs_VegOct.xlsx"),colNames = TRUE, rowNames = TRUE)
+```
+
+
+Group them by main cell types in heatmap
+```{r}
+annotation_map_Fem <- c(
+  "Fem_1_Pith bottom" = "Pith", 
+  "Fem_2_Vasculature" = "Vasculature", 
+  "Fem_3_LOs-bracts"= "Lateral Organs",
+  "Fem_4_Meristem top"= "Meristem",
+  "Fem_5_LOs-scales"= "Lateral Organs",
+  "Fem_6_LOs towards vasculature"= "Lateral Organs",
+  "Fem_7_Vasculature towards LOs-scales"= "Vasculature",
+  "Fem_8_LO-scales"= "Lateral Organs",
+  "Fem_9_LOs-vasculature-towards scales "= "Lateral Organs",
+  "Fem_10_LOs-scales"= "Lateral Organs",
+  "Fem_11_Pith middle"= "Pith",
+  "Fem_12_Pith middle top"= "Pith",
+  "Fem_13_Meristem-pith-vasculature and LOs"= "Meristem",
+  "Fem_14_Meristem-scales with meristematic cells"= "Meristem",
+  "Fem_15_LOs bracts"= "Lateral Organs"
+)
+
+cell_classes_Fem <- annotation_map_Fem[rownames(overlap_matrix)]
+
+annotation_map_Veg <- c(
+  "Veg_1_Meristem-top LOs" = "Meristem", 
+  "Veg_2_Vasculature-LOs"= "Vasculature", 
+  "Veg_3_Pith bottom-lowest LOs"= "Pith",
+  "Veg_4_LOs"= "Lateral Organs",
+  "Veg_5_Pith bottom"= "Pith",
+  "Veg_6_LOs bottom"= "Lateral Organs",
+  "Veg_7_LOs top"= "Lateral Organs",
+  "Veg_8_Vasculature bottom"= "Vasculature",
+  "Veg_9_Pith middle"= "Pith",
+  "Veg_10_LOs-vasculature"= "Lateral Organs",
+  "Veg_11_Pith top"= "Pith"
+)
+
+cell_classes_Veg <- annotation_map_Veg[colnames(overlap_matrix)]
+
+row_order <- order(cell_classes_Fem)
+col_order <- order(cell_classes_Veg)
+```
+
+Re-order matrix based on these annotations
+```{r}
+overlap_matrix_ordered <- overlap_matrix[row_order, col_order]
+```
+
+```{r}
+# Heatmap visualization
+p <- pheatmap(overlap_matrix_ordered,
+         annotation_row = data.frame(Class = cell_classes_Fem),
+         annotation_col = data.frame(Class = cell_classes_Veg),
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,   # cluster Veg cell types
+         display_numbers = TRUE, # show % values
+         number_format = "%.1f", # one decimal
+         fontsize_number = 7,
+         fontsize_row = 7,
+         fontsize_col =7,
+         main = "Gene Marker Overlap Fem15 vs Veg11 (%)")
+
+ggsave(file = paste0(directory, "heatmaps/heatmap_overlap_Fem_Veg/heatmap_overlap_matrix_gene_markers_FemOct_vs_VegOct_ordered.pdf"), plot = p, width = 15, height =10, dpi = 300)
+```
+
+
+### 4. Compute overlap between Acro20 and Veg11 
+```{r}
+#top_markers_AcroOct <- as.data.frame(top_markers_AcroOct_list)
+#names(top_markers_AcroOct) <- paste0("Acro_CellType_", 1:20)
+#top_markers_VegOct <- as.data.frame(top_markers_Veg)
+#names(top_markers_VegOct) <- paste0("Veg_CellType_", 1:11)
+
+# Compute overlap matrix
+overlap_matrix <- matrix(0, 
+                         nrow = length(top_markers_AcroOct), 
+                         ncol = length(top_markers_VegOct),
+                         dimnames = list(names(top_markers_AcroOct), 
+                                         names(top_markers_VegOct)))
+
+for (f_ct in names(top_markers_AcroOct)) {
+  for (a_ct in names(top_markers_VegOct)) {
+    
+    common_genes <- intersect(top_markers_AcroOct[[f_ct]], 
+                              top_markers_VegOct[[a_ct]])
+    
+    overlap_matrix[f_ct, a_ct] <- length(common_genes) / 50 * 100
+  }
+}
+
+write.xlsx(overlap_matrix, file = paste0(directory, "heatmaps/heatmap_overlap_Acro_Veg/overlap_matrix_top50_gene_markers_AcroOct_vs_VegOct.xlsx"),colNames = TRUE, rowNames = TRUE)
+```
+
+```{r}
+cell_classes_Acro <- annotation_map_Acro[rownames(overlap_matrix)]
+cell_classes_Veg <- annotation_map_Veg[colnames(overlap_matrix)]
+
+row_order <- order(cell_classes_Acro)
+col_order <- order(cell_classes_Veg)
+
+overlap_matrix_ordered <- overlap_matrix[row_order, col_order]
+```
+
+
+```{r}
+# Heatmap visualization
+p <- pheatmap(overlap_matrix_ordered,
+         annotation_row = data.frame(Class = cell_classes_Acro),
+         annotation_col = data.frame(Class = cell_classes_Veg),
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,   # cluster Veg cell types
+         display_numbers = TRUE, # show % values
+         number_format = "%.1f", # one decimal
+         fontsize_number = 7,
+         fontsize_row = 7,
+         fontsize_col =7,
+         main = "Gene Marker Overlap Acro20 vs Veg11 (%)")
+
+ggsave(file = paste0(directory, "heatmaps/heatmap_overlap_Acro_Veg/heatmap_overlap_matrix_gene_markers_AcroOct_vs_VegOct_ordered.pdf"), plot = p, width = 15, height =10, dpi = 300)
+```
+
+
+### 5. Compute overlap between Fem15 and Acro20
+```{r}
+#top_markers_AcroOct <- as.data.frame(top_markers_AcroOct_list)
+#names(top_markers_AcroOct) <- paste0("Acro_CellType_", 1:20)
+#top_markers_VegOct <- as.data.frame(top_markers_Veg)
+#names(top_markers_VegOct) <- paste0("Veg_CellType_", 1:11)
+
+# Compute overlap matrix
+overlap_matrix <- matrix(0, 
+                         nrow = length(top_markers_FemOct), 
+                         ncol = length(top_markers_AcroOct),
+                         dimnames = list(names(top_markers_FemOct), 
+                                         names(top_markers_AcroOct)))
+
+for (f_ct in names(top_markers_FemOct)) {
+  for (a_ct in names(top_markers_AcroOct)) {
+    
+    common_genes <- intersect(top_markers_FemOct[[f_ct]], 
+                              top_markers_AcroOct[[a_ct]])
+    
+    overlap_matrix[f_ct, a_ct] <- length(common_genes) / 50 * 100
+  }
+}
+
+write.xlsx(overlap_matrix, file = paste0(directory, "heatmaps/heatmap_overlap_Fem_Acro/overlap_matrix_top50_gene_markers_FemOct_vs_AcroOct.xlsx"),colNames = TRUE, rowNames = TRUE)
+```
+
+Group them by main cell types in heatmap
+```{r}
+annotation_map_Fem <- c(
+  "Fem_1_Pith bottom" = "Pith", 
+  "Fem_2_Vasculature" = "Vasculature", 
+  "Fem_3_LOs-bracts"= "Lateral Organs",
+  "Fem_4_Meristem top"= "Meristem",
+  "Fem_5_LOs-scales"= "Lateral Organs",
+  "Fem_6_LOs towards vasculature"= "Lateral Organs",
+  "Fem_7_Vasculature towards LOs-scales"= "Vasculature",
+  "Fem_8_LO-scales"= "Lateral Organs",
+  "Fem_9_LOs-vasculature-towards scales "= "Lateral Organs",
+  "Fem_10_LOs-scales"= "Lateral Organs",
+  "Fem_11_Pith middle"= "Pith",
+  "Fem_12_Pith middle top"= "Pith",
+  "Fem_13_Meristem-pith-vasculature and LOs"= "Meristem",
+  "Fem_14_Meristem-scales with meristematic cells"= "Meristem",
+  "Fem_15_LOs bracts"= "Lateral Organs"
+)
+
+cell_classes_Fem <- annotation_map_Fem[rownames(overlap_matrix)]
+
+annotation_map_Acro <- c(
+  "Acro_1_Vasculature-LOs" = "Vasculature", 
+  "Acro_2_Pith" = "Pith", 
+  "Acro_3_Vasculature-LOs top" = "Vasculature",
+  "Acro_4_LOs bottom" = "Lateral Organs",
+  "Acro_5_LOs top-scales" = "Lateral Organs",
+  "Acro_6_Bottom pith-LOs" = "Pith",
+  "Acro_7_Pith bottom" = "Pith",
+  "Acro_8_Meristem-vasculature and scales" = "Meristem",
+  "Acro_9_Pith bottom middle" = "Pith",
+  "Acro_10_Meristem-scales" = "Meristem",
+  "Acro_11_LOs top" = "Lateral Organs",
+  "Acro_12_LOs" = "Lateral Organs",
+  "Acro_13_Pith-LOs" = "Pith",
+  "Acro_14_Vasculature-LOs bottom" = "Vasculature",
+  "Acro_15_Pith top" = "Pith",
+  "Acro_16_LOs bottom" = "Lateral Organs",
+  "Acro_17_Pith top middle" = "Pith",
+  "Acro_18_LOs top middle (transition zone)-vaculature-scales" = "Lateral Organs",
+  "Acro_19_LOs top middle (transition zone)-bracts" = "Lateral Organs",
+  "Acro_20_Pith top middle" = "Pith"
+)
+
+cell_classes_Acro <- annotation_map_Acro[colnames(overlap_matrix)]
+
+row_order <- order(cell_classes_Fem)
+col_order <- order(cell_classes_Acro)
+```
+
+Re-order matrix based on these annotations
+```{r}
+overlap_matrix_ordered <- overlap_matrix[row_order, col_order]
+```
+
+```{r}
+# Heatmap visualization
+p <- pheatmap(overlap_matrix_ordered,
+         annotation_row = data.frame(Class = cell_classes_Fem),
+         annotation_col = data.frame(Class = cell_classes_Acro),
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,   # cluster Acro cell types
+         display_numbers = TRUE, # show % values
+         number_format = "%.1f", # one decimal
+         fontsize_number = 7,
+         fontsize_row = 7,
+         fontsize_col =7,
+         main = "Gene Marker Overlap Fem15 vs Acro20 (%)")
+
+ggsave(file = paste0(directory, "heatmaps/heatmap_overlap_Fem_Acro/heatmap_overlap_matrix_top50_gene_markers_FemOct_vs_AcroOct_ordered.pdf"), plot = p, width = 15, height =10, dpi = 300)
+```
+
+
+
+### 6. Compute overlap within Fem 15 cell types
+```{r}
+#top_markers_FemOct <- as.data.frame(top_markers_FemOct_list)
+#names(top_markers_FemOct) <- paste0("Fem_CellType_", 1:15)
+
+
+# Compute overlap matrix (15 × 20)
+overlap_matrix_FemFem <- matrix(0, 
+                         nrow = length(top_markers_FemOct), 
+                         ncol = length(top_markers_FemOct),
+                         dimnames = list(names(top_markers_FemOct), 
+                                         names(top_markers_FemOct)))
+
+for (f_ct in names(top_markers_FemOct)) {
+  for (a_ct in names(top_markers_FemOct)) {
+    
+    common_genes <- intersect(top_markers_FemOct[[f_ct]], 
+                              top_markers_FemOct[[a_ct]])
+    
+    overlap_matrix_FemFem[f_ct, a_ct] <- length(common_genes) / 50 * 100
+  }
+}
+
+write.xlsx(overlap_matrix_FemFem, file = paste0(directory, "heatmaps/heatmap_overlap_Fem_Fem/overlap_matrix_top50_gene_markers_FemOct_vs_FemOct.xlsx"),colNames = TRUE, rowNames = TRUE)
+```
+
+```{r}
+cell_classes_Fem <- annotation_map_Fem[rownames(overlap_matrix_FemFem)]
+cell_classes_Fem2 <- annotation_map_Fem[colnames(overlap_matrix_FemFem)]
+
+row_order <- order(cell_classes_Fem)
+col_order <- order(cell_classes_Fem)
+
+overlap_matrix_ordered <- overlap_matrix_FemFem[row_order, col_order]
+```
+
+```{r}
+# Heatmap visualization
+p <- pheatmap(overlap_matrix_ordered,
+         annotation_row = data.frame(Class = cell_classes_Fem),
+         annotation_col = data.frame(Class = cell_classes_Fem),
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,   # cluster Female cell types
+         display_numbers = TRUE, # show % values
+         number_format = "%.1f", # one decimal
+         fontsize_number = 7,
+         fontsize_row = 7,
+         fontsize_col =7,
+         main = "Gene Marker Overlap within FemOct15 (%)")
+#grid.text("FemOct Cell Types K15", x = 0.5, y = 0.01, gp = gpar(fontsize = 10))  # x-axis
+#grid.text("FemOct Cell Types K15", x = 0.98, y = 0.5, rot = 90, gp = gpar(fontsize = 10))
+
+ggsave(file = paste0(directory, "heatmaps/heatmap_overlap_Fem_Fem/heatmap_overlap_matrix_top50_gene_markers_FemOct_vs_FemOct_ordered.pdf"), plot = p, width = 15, height =10, dpi = 300)
+```
+
+### 7. Compute overlap within Acro 20 cell types
+```{r}
+overlap_matrix <- matrix(0, 
+                         nrow = length(top_markers_AcroOct), 
+                         ncol = length(top_markers_AcroOct),
+                         dimnames = list(names(top_markers_AcroOct), 
+                                         names(top_markers_AcroOct)))
+
+for (f_ct in names(top_markers_AcroOct)) {
+  for (a_ct in names(top_markers_AcroOct)) {
+    
+    common_genes <- intersect(top_markers_AcroOct[[f_ct]], 
+                              top_markers_AcroOct[[a_ct]])
+    
+    overlap_matrix[f_ct, a_ct] <- length(common_genes) / 50 * 100
+  }
+}
+
+write.xlsx(overlap_matrix, file = paste0(directory, "heatmaps/heatmap_overlap_Acro_Acro/overlap_matrix_top50_gene_markers_AcroOct_vs_AcroOct.xlsx"),colNames = TRUE, rowNames = TRUE)
+```
+
+```{r}
+cell_classes_Acro <- annotation_map_Acro[rownames(overlap_matrix)]
+
+row_order <- order(cell_classes_Acro)
+col_order <- order(cell_classes_Acro)
+
+overlap_matrix_ordered <- overlap_matrix[row_order, col_order]
+```
+
+```{r}
+# Heatmap visualization
+p <- pheatmap(overlap_matrix_ordered,
+         annotation_row = data.frame(Class = cell_classes_Acro),
+         annotation_col = data.frame(Class = cell_classes_Acro),
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,   # cluster Acro cell types
+         display_numbers = TRUE, # show % values
+         number_format = "%.1f", # one decimal
+         fontsize_number = 7,
+         fontsize_row = 7,
+         fontsize_col =7,
+         main = "Gene Marker Overlap within Acro20 (%)")
+
+ggsave(file = paste0(directory, "heatmaps/heatmap_overlap_Acro_Acro/heatmap_overlap_matrix_top50_gene_markers_AcroOct_vs_AcroOct_ordered.pdf"), plot = p, width = 15, height =10, dpi = 300)
+```
+
+### 8. Compute overlap within Veg 11 cell types
+```{r}
+overlap_matrix <- matrix(0, 
+                         nrow = length(top_markers_VegOct), 
+                         ncol = length(top_markers_VegOct),
+                         dimnames = list(names(top_markers_VegOct), 
+                                         names(top_markers_VegOct)))
+
+for (f_ct in names(top_markers_VegOct)) {
+  for (a_ct in names(top_markers_VegOct)) {
+    
+    common_genes <- intersect(top_markers_VegOct[[f_ct]], 
+                              top_markers_VegOct[[a_ct]])
+    
+    overlap_matrix[f_ct, a_ct] <- length(common_genes) / 50 * 100
+  }
+}
+
+write.xlsx(overlap_matrix, file = paste0(directory, "heatmaps/heatmap_overlap_Veg_Veg/overlap_matrix_top50_gene_markers_VegOct_vs_VegOct.xlsx"),colNames = TRUE, rowNames = TRUE)
+```
+
+```{r}
+cell_classes_Veg <- annotation_map_Veg[rownames(overlap_matrix)]
+
+row_order <- order(cell_classes_Veg)
+col_order <- order(cell_classes_Veg)
+
+overlap_matrix_ordered <- overlap_matrix[row_order, col_order]
+```
+
+```{r}
+# Heatmap visualization
+p <- pheatmap(overlap_matrix_ordered,
+         annotation_row = data.frame(Class = cell_classes_Veg),
+         annotation_col = data.frame(Class = cell_classes_Veg),
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,   # cluster Veg cell types
+         display_numbers = TRUE, # show % values
+         number_format = "%.1f", # one decimal
+         fontsize_number = 7,
+         fontsize_row = 7,
+         fontsize_col =7,
+         main = "Gene Marker Overlap within Veg11 (%)")
+
+ggsave(file = paste0(directory, "heatmaps/heatmap_overlap_Veg_Veg/heatmap_overlap_matrix_top50_gene_markers_VegOct_vs_VegOct_ordered.pdf"), plot = p, width = 15, height =10, dpi = 300)
+```
+
+
+# 9. GO term analysis for marker genes
+
+### a. Get file with Arabidopsis annotations
+Read in the annotations files. spruce gene --> arabidopsis gene  
+```{r}
+FemOct_Arabidopsis_annotations <- read.xlsx("TableSX_STdeconvolve_GO_summary_VegOct_FemOct_AcroOct.xlsx", colNames = TRUE, rowNames = TRUE) # take sheet 2
+
+AcroOct_Arabidopsis_annotations <- read.xlsx("TableSX_STdeconvolve_GO_summary_VegOct_FemOct_AcroOct.xlsx", colNames = TRUE, rowNames = TRUE) #take sheet 3
+
+VegOct_Arabidopsis_annotations <- read.xlsx("TableSX_STdeconvolve_GO_summary_VegOct_FemOct_AcroOct.xlsx", colNames = TRUE, rowNames = TRUE) #take sheet 1
+```
+
+Filter for log2FC >1. 
+```{r}
+FemOct_Arabidopsis_annotations_db <- as.data.frame(FemOct_Arabidopsis_annotations)
+AcroOct_Arabidopsis_annotations_db <- as.data.frame(AcroOct_Arabidopsis_annotations)
+VegOct_Arabidopsis_annotations_db <- as.data.frame(VegOct_Arabidopsis_annotations)
+```
+
+```{r}
+FemOct_Arabidopsis_annotations_db <- FemOct_Arabidopsis_annotations_db %>%
+  dplyr::filter(log2FC > 1)
+
+AcroOct_Arabidopsis_annotations_db <- AcroOct_Arabidopsis_annotations_db %>%
+  dplyr::filter(log2FC > 1)
+
+VegOct_Arabidopsis_annotations_db <- VegOct_Arabidopsis_annotations_db %>%
+  dplyr::filter(log2FC > 1)
+```
+
+GO enrichment with Arabidopsis IDs column "ATG.Best.DIAMOND"
+
+### b. GO analysis for each bud type: FemOct, AcroOct, VegOct
+
+For this, we are using clusterProfiler and org.At.tair.db.
+
+```{r}
+#renv::install("clusterProfiler")
+library(clusterProfiler)
+library(org.At.tair.db)
+```
+
+### For FemOct
+
+```{r}
+library(dplyr)
+library(stringr)
+
+# FemOct_Arabidopsis_annotations_db$ATG.Best.DIAMOND
+# FemOct_Arabidopsis_annotations_db$cell_type
+# Make sure the CellType column is a factor or character
+FemOct_Arabidopsis_annotations_db$cell_type <- as.factor(FemOct_Arabidopsis_annotations_db$cell_type)
+
+# List of unique cell types
+cell_types <- unique(FemOct_Arabidopsis_annotations_db$cell_type)
+
+# Create a list to store all cell type results
+all_cell_results <- list()
+
+# Loop over each cell type
+for (cell in cell_types) {
+  
+  # Subset genes for this cell type
+  genes <- FemOct_Arabidopsis_annotations_db %>%
+    filter(cell_type == cell) %>%
+    pull(ATG.Best.DIAMOND) %>%
+    na.omit() %>%
+    unique()
+  
+  # Skip if no genes
+  if (length(genes) == 0) next
+  
+  # GO enrichment
+  ego <- enrichGO(
+    gene          = genes,
+    OrgDb         = org.At.tair.db,
+    keyType       = "TAIR",
+    ont           = "BP",         # Change to "BP" MF" or "CC" if needed
+    pAdjustMethod = "BH",
+    pvalueCutoff  = 0.05,
+    qvalueCutoff  = 0.2,
+    readable      = FALSE
+  )
+  
+  # Skip if no enrichment
+  if (is.null(ego) || nrow(ego) == 0) next
+  
+  # Dotplot
+  p <- dotplot(ego, showCategory = 20, orderBy = "p.adjust") +
+    ggtitle(paste("Top 20 GO Terms for FemOct cell type", cell))
+  
+  # Save plot
+  ggsave(filename = paste0("/GO_terms/FemOct/GO_dotplots_top20_BP_terms/Top20_GO_dotplot_celltype", cell, ".png"), plot = p, width = 8, height = 12)
+  
+  
+   # Extract enrichment results correctly
+  ego_df <- ego@result
+  
+  # Filter Count column for at least 2 genes
+  ego_df <- ego_df %>%
+    filter(Count >= 2)
+  
+  # Add cell type column
+  ego_df$CellType <- cell
+  
+  # Select key columns
+  ego_summary <- ego_df %>%
+    dplyr::select(CellType,
+           ID, Description,
+           Count,
+           pvalue, p.adjust, qvalue,
+           geneID) 
+  
+  # Save per cell type
+  write_csv(ego_summary, paste0("/GO_terms/FemOct/GO_summary_BP_tables/GO_summary_celltype_", cell, ".csv"))
+  
+  all_cell_results[[cell]] <- ego_summary
+  
+  
+  print(paste("Finished GO analysis for cell type:", cell))
+}
+
+# Combine all into one table
+combined_GO_summary <- bind_rows(all_cell_results)
+
+# Save combined table
+write_csv(combined_GO_summary, "/GO_terms/FemOct/GO_summary_BP_tables/All_cells_GO_summary_FemOct.csv")
+
+```
+
+### For AcroOct
+```{r}
+# Make sure the CellType column is a factor or character
+AcroOct_Arabidopsis_annotations_db$cell_type <- as.factor(AcroOct_Arabidopsis_annotations_db$cell_type)
+
+# List of unique cell types
+cell_types <- unique(AcroOct_Arabidopsis_annotations_db$cell_type)
+
+# Create a list to store all cell type results
+all_cell_results <- list()
+
+# Loop over each cell type
+for (cell in cell_types) {
+  
+  # Subset genes for this cell type
+  genes <- AcroOct_Arabidopsis_annotations_db %>%
+    filter(cell_type == cell) %>%
+    pull(ATG.Best.DIAMOND) %>%
+    na.omit() %>%
+    unique()
+  
+  # Skip if no genes
+  if (length(genes) == 0) next
+  
+  # GO enrichment
+  ego <- enrichGO(
+    gene          = genes,
+    OrgDb         = org.At.tair.db,
+    keyType       = "TAIR",
+    ont           = "BP",         # Change to "MF" or "CC" if needed
+    pAdjustMethod = "BH",
+    pvalueCutoff  = 0.05,
+    qvalueCutoff  = 0.2,
+    readable      = FALSE,
+    minGSSize = 2 
+  )
+  
+  # Skip if no enrichment
+  if (is.null(ego) || nrow(ego) == 0) next
+  
+  # Dotplot
+  p <- dotplot(ego, showCategory = 20, orderBy = "p.adjust") +
+    ggtitle(paste("Top 20 GO Terms for cell type", cell))
+  
+  # Save plot
+  ggsave(filename = paste0("/GO_terms/AcroOct/GO_dotplots_top20_BP_terms/Top20_GO_dotplot_celltype_", cell, ".png"), plot = p, width = 8, height = 12)
+  
+  
+   # Extract enrichment results correctly
+  ego_df <- ego@result
+  
+  # Filter Count column for at least 2 genes
+  ego_df <- ego_df %>%
+    filter(Count >= 2)
+  
+  # Add cell type column
+  ego_df$CellType <- cell
+  
+  # Select key columns
+  ego_summary <- ego_df %>%
+    dplyr::select(CellType,
+           ID, Description,
+           Count,
+           pvalue, p.adjust, qvalue,
+           geneID) 
+  
+  # Save per cell type
+  write_csv(ego_summary, paste0("/GO_terms/AcroOct/GO_summary_BP_tables/GO_summary_celltype_", cell, ".csv"))
+  
+  all_cell_results[[cell]] <- ego_summary
+  
+  print(paste("Finished GO analysis for cell type:", cell))
+}
+
+# Combine all into one table
+combined_GO_summary <- bind_rows(all_cell_results)
+
+# Save combined table
+write_csv(combined_GO_summary, "/GO_terms/AcroOct/GO_summary_BP_tables_new_names/All_cells_GO_summary_AcroOct.csv")
+```
+
+### For VegOct
+```{r}
+# Make sure the CellType column is a factor or character
+VegOct_Arabidopsis_annotations_db$cell_type <- as.factor(VegOct_Arabidopsis_annotations_db$cell_type)
+
+# List of unique cell types
+cell_types <- unique(VegOct_Arabidopsis_annotations_db$cell_type)
+
+# Create a list to store all cell type results
+all_cell_results <- list()
+
+# Loop over each cell type
+for (cell in cell_types) {
+  
+  # Subset genes for this cell type
+  genes <- VegOct_Arabidopsis_annotations_db %>%
+    filter(cell_type == cell) %>%
+    pull(ATG.Best.DIAMOND) %>%
+    na.omit() %>%
+    unique()
+  
+  # Skip if no genes
+  if (length(genes) == 0) next
+  
+  # GO enrichment
+  ego <- enrichGO(
+    gene          = genes,
+    OrgDb         = org.At.tair.db,
+    keyType       = "TAIR",
+    ont           = "BP",         # Change to "MF" or "CC" if needed
+    pAdjustMethod = "BH",
+    pvalueCutoff  = 0.05,
+    qvalueCutoff  = 0.2,
+    readable      = FALSE,
+    minGSSize = 2 
+  )
+  
+  # Skip if no enrichment
+  if (is.null(ego) || nrow(ego) == 0) next
+  
+  # Dotplot
+  p <- dotplot(ego, showCategory = 20, orderBy = "p.adjust") +
+    ggtitle(paste("Top 20 GO Terms for AcroOct cell type", cell))
+  
+  # Save plot
+  ggsave(filename = paste0("/GO_terms/VegOct/GO_dotplots_top20_BP_terms/Top20_GO_dotplot_celltype_", cell, ".png"), plot = p, width = 8, height = 12)
+  
+  
+   # Extract enrichment results correctly
+  ego_df <- ego@result
+  
+  # Filter Count column for at least 2 genes
+  #ego_df <- ego_df %>%
+  #  filter(Count >= 2)
+  
+  # Add cell type column
+  ego_df$CellType <- cell
+  
+  # Select key columns
+  ego_summary <- ego_df %>%
+    dplyr::select(CellType,
+           ID, Description,
+           Count,
+           pvalue, p.adjust, qvalue,
+           geneID) 
+  
+  # Save per cell type
+  write_csv(ego_summary, paste0("/GO_terms/VegOct/GO_summary_BP_tables/all_genes_GO_summary_celltype_", cell, ".csv"))
+  
+  all_cell_results[[cell]] <- ego_summary
+  
+  print(paste("Finished GO analysis for cell type:", cell))
+}
+
+# Combine all into one table
+combined_GO_summary <- bind_rows(all_cell_results)
+
+# Save combined table
+write_csv(combined_GO_summary, "/GO_terms/VegOct/GO_summary_BP_tables_new_names/All_cells_GO_summary_VegOct.csv")
+```
+
+
+# 10. Pearson correlations between cell types
+Between cell types: 
+  Fem vs Acro, 
+  Fem vs Veg, 
+  Acro vs Veg, 
+  Fem vs Fem, 
+  Acro vs Acro, 
+  Veg vs Veg
+
+Load all 3 beta matrices
+FemOct
+```{r}
+FemOct_beta_K15 <- read.xlsx("/beta_matrix_FemOct_K15.xlsx", colNames = TRUE, rowNames = TRUE)
+```
+
+AcroOct
+```{r}
+AcroOct_beta_K20 <- read.xlsx("beta_matrix_AroOct_K20.xlsx", colNames = TRUE, rowNames = TRUE)
+
+```
+
+VegOct 
+```{r}
+VegOct_beta_K11 <- read.xlsx("beta_matrix_VegOct_K11.xlsx", colNames = TRUE, rowNames = TRUE)
+```
+
+```{r}
+deconGexp_Fem <- data.frame(FemOct_beta_K15)
+# Ensure matrix is numeric
+deconGexp_Fem <- as.matrix(sapply(deconGexp_Fem, as.numeric))
+rownames(deconGexp_Fem) <- 1:nrow(deconGexp_Fem)
+
+deconGexp_AcroOct <- data.frame(AcroOct_beta_K20)
+# Ensure matrix is numeric
+deconGexp_AcroOct <- as.matrix(sapply(deconGexp_AcroOct, as.numeric))
+rownames(deconGexp_AcroOct) <- 1:nrow(deconGexp_AcroOct)
+
+deconGexp_Veg <- data.frame(VegOct_beta_K11)
+# Ensure matrix is numeric
+deconGexp_Veg <- as.matrix(sapply(deconGexp_Veg, as.numeric))
+rownames(deconGexp_Veg) <- 1:nrow(deconGexp_Veg)
+```
+
+```{r}
+m1 <- deconGexp_Fem
+m2 <- deconGexp_AcroOct
+
+rownames(m1) <- paste0("X", rownames(m1))
+rownames(m2) <- paste0("X", rownames(m2))
+
+corMtx <- STdeconvolve::getCorrMtx(m1 = as.matrix(m1),
+                                   m2 = as.matrix(m2),
+                                   type = "b")
+```
+
+```{r}
+#pairs <- STdeconvolve::lsatPairs(corMtx) 
+```
+N.B. the commented line goes from nxm to nxn if m>n. For ex: from 11x20 to 11x11 for Veg vs Acro, so some Acro cell types are removed.
+It does an optimal assignment:
+1 => 3, 2 => 18, 3 => 6, 4 => 12, 5 => 20, 6 => 8, 7 => 10, 8 => 19, 9 => 9, 10 => 5, 11 => 15. So those not here are excluded. 
+Therefore, we will skip this optimal assignment step
+
+
+```{r}
+plt <- STdeconvolve::correlationPlot(mat = corMtx,
+                                     colLabs = "FemOct_K15", # aka x-axis, and rows of matrix
+                                     rowLabs = "AcroOct_K20", # aka y-axis, and columns of matrix
+                                     title = "Transcriptional profile correlation within VegOct deconvolved cell types",
+                                     annotation = TRUE) +
+                    ggplot2::theme(axis.text.x = ggplot2::element_text(size=12, color = "black", hjust = 0, vjust = 0.5),
+                                   axis.text.y = ggplot2::element_text(size=12, color = "black"),
+                                   axis.title.y = ggplot2::element_text(size=15),
+                                   axis.title.x = ggplot2::element_text(size=15),
+                                   plot.title = ggplot2::element_text(size=0),
+                                   legend.text = ggplot2::element_text(size = 15, colour = "black"),
+                                   legend.title = ggplot2::element_text(size = 15, colour = "black", angle = 90),
+                                   panel.background = ggplot2::element_blank(),
+                                   ## border around plot
+                                   panel.border = ggplot2::element_rect(fill = NA, color = "black", size = 2),
+                                   plot.background = ggplot2::element_blank()
+                                   # legend.position="none"
+                                   )
+
+plt
+```
+
+```{r}
+ggsave(filename = paste0("Pearson_corr_cell_types_FemOctK15_AcroOctK20_full", ".pdf"), plot = plt, width = 12, height = 16)
+```
+
+
+
+## Session info
+
+<details>
+
+<summary>
+
+</summary>
+
+```{r}
+sessionInfo()
+Sys.Date()
+Sys.time()
+```
