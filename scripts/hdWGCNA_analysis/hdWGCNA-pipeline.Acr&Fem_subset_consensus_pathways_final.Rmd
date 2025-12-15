@@ -1,0 +1,1632 @@
+---
+title: "hdWGCNA pipeline - Spruce Project"
+subtitle: "Acrocona and Female subset - all timepoints; Harmonized ME; Consensus pathway"
+author: "Mario Liva and Sofia Rouot"
+date: "`r Sys.Date()`"
+output: 
+    html_document:
+      code_folding: show
+      toc: true
+      toc_float: true
+      toc_depth: 5
+      collapsed: false
+      number_sections: false
+---
+
+## Introduction to the file
+
+This tutorial provides the basic steps to process objects obtained with seurat/semla to get co-expression networks and associate them to biological functions through GO. This tutorial is inspired by different pipelines that are included on [this page](https://smorabit.github.io/hdWGCNA/). Specifically, the Acrocona and Female subsets were chosen and a consensus analysis was performed. 
+
+This script is organized in 3 main chapters:
+
+1.  Preparation of the dataset for hdWGCNA
+2.  Generation of the consensus co-expression network with hdWGCNA
+3.  Co-expression module dynamics with pseudotime
+
+## 1. Preparation of the dataset
+
+First of all, we need to load all the libraries required:
+
+```{r warning=FALSE}
+#loading libraries
+suppressPackageStartupMessages({
+  # single-cell analysis package
+  library(Seurat)
+  library(SeuratObject)
+  # plotting and data science packages
+  library(tidyverse)
+  library(cowplot)
+  library(patchwork)
+  # co-expression network analysis packages:
+  library(WGCNA)
+  library(hdWGCNA)
+  library(readxl)
+  # using the cowplot theme for ggplot
+  theme_set(theme_cowplot())
+  # set random seed for reproducibility
+  set.seed(12345)
+  library(semla)
+  library(WriteXLS)
+  library(harmony)
+  library(gridExtra)
+  library(ggrepel)
+  library(reshape2)
+  library(igraph)
+})
+
+```
+
+
+We also need to upload some functions that have been modified to obtain specific variants of the pre-defined plot types.
+
+```{r, collapse=TRUE}
+#loading function for later
+make_hex_spots <- function(cdata, fill){
+  r <- 1/2
+  R <- (2/sqrt(3)) * r
+  
+  spot_positions <- select_spot_positions(cdata, fill = fill)
+  spot_positions <- adjust_hex_centers(spot_positions)
+  vertex_offsets <- data.frame(x.offset = c(0, r, r, 0, -r,
+                                            -r), y.offset = c(-R, -R/2, R/2, R, R/2, -R/2))
+  spot_vertices <- make_spot_vertices(spot_positions, vertex_offsets)
+  spot_vertices$y.vertex <- -spot_vertices$y.vertex
+  spot_vertices
+}
+
+select_spot_positions <- function (cdata, x = "col", y = "row", fill = "spatial.cluster")
+{
+  assertthat::assert_that(is.vector(fill) || is.character(fill) || is.factor(fill))
+  if (is.character(fill) && length(fill) == 1) {
+    spot_positions <- cdata[, c(x, y, fill)]
+    colnames(spot_positions) <- c("x.pos", "y.pos", "fill")
+  }
+  else if (is.vector(fill) || is.factor(fill)) {
+    
+    assertthat::assert_that(nrow(cdata) == length(fill))
+    spot_positions <- cdata[, c(x, y)]
+    colnames(spot_positions) <- c("x.pos", "y.pos")
+    spot_positions$fill <- fill
+  }
+  spot_positions$spot <- rownames(spot_positions)
+  spot_positions
+}
+
+adjust_hex_centers <- function (spot_positions)
+{
+  r <- 1/2
+  R <- (2/sqrt(3)) * r
+  
+  spot_positions$x.pos <- spot_positions$x.pos - min(spot_positions$x.pos) +
+    1
+  spot_positions$y.pos <- spot_positions$y.pos - min(spot_positions$y.pos) +
+    1
+  spot_positions$y.pos <- spot_positions$y.pos * R * (3/2)
+  spot_positions$x.pos <- (spot_positions$x.pos + 1)/2
+  
+  spot_positions
+}
+
+make_spot_vertices <- function (spot_positions, vertex_offsets)
+{
+  spot_vertices <- merge(spot_positions, vertex_offsets)
+  spot_vertices$x.vertex <- spot_vertices$x.pos + spot_vertices$x.offset
+  spot_vertices$y.vertex <- spot_vertices$y.pos + spot_vertices$y.offset
+  as.data.frame(spot_vertices)
+}
+
+pseudobulk_edgeR <- function(
+    seurat_obj,
+    cell_type_col = 'cell_type',
+    label_col = 'Diagnosis',
+    replicate_col = 'Sample',
+    covariates = NULL,
+    slot = 'counts',
+    assay = 'RNA',
+    cells_use = NULL
+){
+  
+  de_family <- 'pseudobulk'
+  de_method <- 'edgeR'
+  de_type <- 'LRT'
+  
+  # get expression matrix from seurat object
+  X <- GetAssayData(seurat_obj, slot=slot, assay=assay)
+  meta <- seurat_obj@meta.data
+  
+  # are we using a subset of the cells?
+  if(!is.null(cells_use)){
+    X <- X[,cells_use]
+    meta <- meta[cells_use,]
+  }
+  
+  print(dim(X))
+  
+  # set up sample level metadata:
+  sample_vars <- c(replicate_col, label_col, covariates)
+  sample_meta <- meta[,sample_vars] %>% distinct()
+  print(sample_vars)
+  
+  # make group sample column
+  sample_meta$group_sample <- paste0(
+    as.character(sample_meta[[replicate_col]]), ':',
+    as.character(sample_meta[[label_col]])
+  )
+  rownames(sample_meta) <- 1:nrow(sample_meta)
+  
+  # use libra to make pseudobulk replicates:
+  matrices <- Libra::to_pseudobulk(
+    X, meta = meta,
+    cell_type_col = cell_type_col,
+    replicate_col = replicate_col,
+    label_col = label_col
+  )
+  
+  # initialize progress bar:
+  
+  # loop over all cell groups
+  cell_groups <- names(matrices)
+  results <- data.frame()
+  pb <- utils::txtProgressBar(min = 0, max = length(cell_groups), style = 3, width = 50, char = "=")
+  counter <- 1
+  for(cur_group in cell_groups){
+    
+    # update progress bar:
+    setTxtProgressBar(pb, counter)
+    
+    # get matrix for this celltype
+    x <- matrices[[cur_group]]
+    
+    # set up sample metadata
+    targets = data.frame(group_sample = colnames(x)) %>%
+      mutate(group = gsub(".*\\:", "", group_sample))
+    
+    # merge with sample meta:
+    gs <- targets$group_sample
+    targets <- merge(sample_meta, targets, by='group_sample')
+    ix <- match(gs,targets$group_sample)
+    targets <- targets[ix,]
+    
+    # keep factor level from seurat obj
+    if (is.factor(meta[[label_col]])) {
+      targets$group %<>% factor(levels = levels(meta[[label_col]]))
+    }
+    
+    # set up formula with covariates:
+    if(!is.null(covariates)){
+      form <- as.formula(paste(c("~", paste(c(label_col, covariates), collapse= ' + ')), collapse=' '))
+    } else{
+      form <- as.formula(paste(c("~", label_col), collapse=' '))
+    }
+    
+    # set up design matrix:
+    design = model.matrix(form, data = targets)
+    
+    # run edgeR
+    y <- edgeR::DGEList(counts = x, group = targets[[label_col]]) %>%
+      edgeR::calcNormFactors(method = 'TMM') %>%
+      edgeR::estimateDisp(design)
+    
+    # fit glm
+    fit <- edgeR::glmFit(y, design = design)
+    test <- edgeR::glmLRT(fit)
+    
+    # set up results
+    res = topTags(test, n = Inf) %>%
+      as.data.frame() %>%
+      rownames_to_column('gene') %>%
+      mutate(de_family = 'pseudobulk',
+             de_method = de_method,
+             de_type = de_type,
+             cell_type = cur_group)
+    
+    colnames(res) %<>%
+      fct_recode('p_val' = 'p.value',  ## DESeq2
+                 'p_val' = 'pvalue',  ## DESeq2
+                 'p_val' = 'p.value',  ## t/wilcox
+                 'p_val' = 'P.Value',  ## limma
+                 'p_val' = 'PValue'  , ## edgeR
+                 'p_val_adj' = 'padj', ## DESeq2/t/wilcox
+                 'p_val_adj' = 'adj.P.Val',      ## limma
+                 'p_val_adj' = 'FDR',            ## edgeER
+                 'avg_logFC' = 'log2FoldChange', ## DESEeq2
+                 'avg_logFC' = 'logFC', ## limma/edgeR
+                 'avg_logFC' = 'avg_log2FC' # Seurat V4
+      ) %>%
+      as.character()
+    
+    
+    # remove unnecessary cols and reorder:
+    res %<>% dplyr::select(c(cell_type, gene, avg_logFC, p_val, p_val_adj, de_family, de_method, de_type))
+    
+    # add to ongoing results:
+    results <- rbind(results, res)
+    
+    counter <- counter + 1
+    
+  }
+  
+  # close progress bar
+  close(pb)
+  
+  results
+  
+}
+
+netVisual_embeddingPairwise <- function(object, slot.name = "netP", type = c("functional","structural"), comparison = NULL, color.use = NULL, point.shape = NULL, pathway.labeled = NULL, top.label = 1, pathway.remove = NULL, pathway.remove.show = TRUE, dot.size = c(2, 6), label.size = 2.5, dot.alpha = 0.5,
+                                        xlabel = "Dim 1", ylabel = "Dim 2", title = NULL,do.label = T, show.legend = T, show.axes = T) {
+  type <- match.arg(type)
+  if (is.null(comparison)) {
+    comparison <- 1:length(unique(object@meta$datasets))
+  }
+  cat("2D visualization of signaling networks from datasets", as.character(comparison), '\n')
+  comparison.name <- paste(comparison, collapse = "-")
+  
+  Y <- methods::slot(object, slot.name)$simiISSTity[[type]]$dr[[comparison.name]]
+  clusters <- methods::slot(object, slot.name)$simiISSTity[[type]]$group[[comparison.name]]
+  object.names <- setdiff(names(methods::slot(object, slot.name)), "simiISSTity")[comparison]
+  prob <- list()
+  for (i in 1:length(comparison)) {
+    object.net <- methods::slot(object, slot.name)[[comparison[i]]]
+    prob[[i]] = object.net$prob
+  }
+  
+  if (is.null(point.shape)) {
+    point.shape <- c(21, 0, 24, 23, 25, 10, 12)
+  }
+  
+  if (is.null(pathway.remove)) {
+    simiISSTity <- methods::slot(object, slot.name)$simiISSTity[[type]]$matrix[[comparison.name]]
+    pathway.remove <- rownames(simiISSTity)[which(colSums(simiISSTity) == 1)]
+    # pathway.remove <- sub("--.*", "", pathway.remove)
+  }
+  
+  if (length(pathway.remove) > 0) {
+    for (i in 1:length(prob)) {
+      probi <- prob[[i]]
+      pathway.remove.idx <- which(paste0(dimnames(probi)[[3]],"--",object.names[i]) %in% pathway.remove)
+      #  pathway.remove.idx <- which(dimnames(probi)[[3]] %in% pathway.remove)
+      if (length(pathway.remove.idx) > 0) {
+        probi <- probi[ , , -pathway.remove.idx]
+      }
+      prob[[i]] <- probi
+    }
+  }
+  prob_sum.each <- list()
+  signalingAll <- c()
+  for (i in 1:length(prob)) {
+    probi <- prob[[i]]
+    prob_sum.each[[i]] <- apply(probi, 3, sum)
+    signalingAll <- c(signalingAll, paste0(names(prob_sum.each[[i]]),"--",object.names[i]))
+  }
+  prob_sum <- unlist(prob_sum.each)
+  names(prob_sum) <- signalingAll
+  
+  group <- sub(".*--", "", names(prob_sum))
+  labels = sub("--.*", "", names(prob_sum))
+  
+  df <- data.frame(x = Y[,1], y = Y[, 2], Commun.Prob. = prob_sum/max(prob_sum),
+                   labels = as.character(labels), clusters = as.factor(clusters), group = factor(group, levels = unique(group)))
+  # color dots (light inside color and dark border) based on clustering and no labels
+  if (is.null(color.use)) {
+    color.use <- ggPalette(length(unique(clusters)))
+  }
+  gg <- ggplot(data = df, aes(x, y)) +
+    geom_point(aes(size = Commun.Prob.,fill = clusters, colour = clusters, shape = group)) +
+    CellChat_theme_opts() +
+    theme(text = element_text(size = 10), legend.key.height = grid::unit(0.15, "in"))+
+    guides(colour = guide_legend(override.aes = list(size = 3)))+
+    labs(title = title, x = xlabel, y = ylabel) +
+    scale_size_continuous(limits = c(0,1), range = dot.size, breaks = c(0.1,0.5,0.9)) +
+    theme(axis.text.x = element_blank(),axis.text.y = element_blank(),axis.ticks = element_blank()) +
+    theme(axis.line.x = element_line(linewidth = 0.25), axis.line.y = element_line(linewidth = 0.25))
+  gg <- gg + scale_fill_manual(values = ggplot2::alpha(color.use, alpha = dot.alpha), drop = FALSE) #+ scale_alpha(group, range = c(0.1, 1))
+  gg <- gg + scale_colour_manual(values = color.use, drop = FALSE)
+  gg <- gg + scale_shape_manual(values = point.shape[1:length(prob)])
+  if (do.label) {
+    gg <- gg + ggrepel::geom_text_repel(mapping = aes(label = labels, colour = clusters, alpha=group), size = label.size, show.legend = F,segment.size = 0.2, segment.alpha = 0.5, max.overlaps=Inf) + scale_alpha_discrete(range = c(1, 0.6))
+  }
+  
+  if (length(pathway.remove) > 0 & pathway.remove.show) {
+    gg <- gg + annotate(geom = 'text', label =  paste("Isolate pathways: ", paste(pathway.remove, collapse = ', ')), x = -Inf, y = Inf, hjust = 0, vjust = 1, size = label.size,fontface="italic")
+  }
+  
+  if (!show.legend) {
+    gg <- gg + theme(legend.position = "none")
+  }
+  
+  if (!show.axes) {
+    gg <- gg + theme_void()
+  }
+  gg
+}
+
+SampleFeaturePlot <- function(
+    seurat_obj,
+    feature,
+    sample_col = "Sample",
+    sample_labels = NULL,
+    samples_to_plot = NULL,
+    raster = TRUE,
+    slot = 'data',
+    assay = NULL,
+    dpi = 800,
+    ncol = 4,
+    plot_max = 'q100',
+    plot_min = 'q0',
+    text_size = 8,
+    colfunc = colorRampPalette(brewer.pal(11, 'Spectral' )),
+    rev_colors = FALSE,
+    combine=TRUE
+){
+  
+  # check that row and col are in the seurat metadata:
+  if(!all(c("col", "row") %in% colnames(seurat_obj@meta.data))){
+    stop("Spatial coordinates must be present in seurat@meta.data, named row and col.")
+  }
+  
+  
+  plot_df <- seurat_obj@meta.data
+  
+  # check if the feature is in the meta-data
+  if(feature %in% rownames(seurat_obj)){
+    if(is.null(assay)){assay <- seurat_obj@active.assay}
+    plot_df$SpatialPlotFeature <- GetAssayData(seurat_obj, slot=slot, assay=assay)[feature,]
+  } else if(feature %in% colnames(plot_df)){
+    if(!is.numeric(plot_df[[feature]])){
+      stop("Specified feature is not numeric. Try plotting with VisDimPlot?")
+    }
+    plot_df$SpatialPlotFeature <- plot_df[[feature]]
+  } else{
+    stop("feature not found in rownames(seurat_obj) or in colnames(seurat_obj@meta.data).")
+  }
+  
+  # get list of samples to plot:
+  if(is.null(samples_to_plot)){
+    samples_to_plot <- unique(plot_df[[sample_col]])
+  } else{
+    if(!all(samples_to_plot %in% unique(plot_df[[sample_col]]))){
+      stop("Some specified samples are not found in seurat_obj@meta.data[[sample_col]].")
+    }
+  }
+  
+  # check sample labels:
+  if(!is.null(sample_labels)){
+    if(!all(sample_labels %in% colnames(seurat_obj@meta.data))){
+      stop("Some sample_labels are not found in colnames(seurat_obj@meta.data)")
+    }
+  }
+  
+  # subset plot_df by specified samples:
+  plot_df <- plot_df[plot_df[[sample_col]] %in% samples_to_plot,]
+  
+  # group by sample_labels
+  if(!is.null(sample_labels)){
+    plot_df <- plot_df %>% group_by(across(all_of(sample_labels))) %>%
+      as.data.frame()
+  }
+  
+  plot_range <- range(plot_df$SpatialPlotFeature)
+  if(!is.null(plot_max)){
+    if(is.character(plot_max)){
+      quant <- as.numeric(gsub('q', '', plot_max)) / 100
+      plot_max <- as.numeric(quantile(plot_df$SpatialPlotFeature, quant))
+    }
+    plot_range[2] <- plot_max
+    print(plot_max)
+    plot_df$SpatialPlotFeature <- ifelse(
+      plot_df$SpatialPlotFeature > plot_max,
+      plot_max,
+      plot_df$SpatialPlotFeature
+    )
+  }
+  
+  if(is.character(plot_min)){
+    quant <- as.numeric(gsub('q', '', plot_min)) / 100
+    plot_min <- as.numeric(quantile(plot_df$SpatialPlotFeature, quant))
+  }
+  plot_range[1] <- plot_min
+  
+  # get the ordering of samples to plot:
+  order_df <- plot_df %>%
+    group_by(across(all_of(sample_labels)))  %>%
+    arrange(.by_group=TRUE) %>%
+    dplyr::select(all_of(c(sample_labels, sample_col))) %>%
+    distinct()
+  
+  samples_to_plot <- as.character(order_df[[sample_col]])
+  
+  plot_list <- list()
+  for(cur_sample in samples_to_plot){
+    print(cur_sample)
+    
+    # get data for this sample and get hex vertex coordinates
+    cur_df <- plot_df[plot_df[[sample_col]] == cur_sample,]
+    vertices <- make_hex_spots(cur_df, cur_df$SpatialPlotFeature)
+    
+    # get sample labels:
+    if(!is.null(sample_labels)){
+      cur_labels <- unlist(lapply(sample_labels, function(x){unique(as.character(cur_df[[x]]))}))
+      plot_label <- paste0(cur_labels, collapse=', ')
+    } else{
+      plot_label <- cur_sample
+    }
+    
+    # initialize gpgplot
+    p <- vertices %>% subset(fill > plot_min) %>%
+      ggplot(aes_(x=~x.vertex, y=~y.vertex,group=~spot, fill=~fill))
+    
+    # add all the grey dots with low/zero expression
+    if(raster){
+      p <- p +
+        ggrastr::rasterise(
+          geom_polygon(data = subset(vertices, fill <= plot_min), fill='lightgrey', size=0),
+          dpi=dpi/2
+        ) +
+        ggrastr::rasterise(geom_polygon(size=0), dpi=dpi)
+    } else{
+      p <- p +
+        geom_polygon(data = subset(vertices, fill <= plot_min), fill='lightgrey', size=0) +
+        geom_polygon(size=0)
+    }
+    
+    # add extras to plot:
+    #colfunc <- colorRampPalette(brewer.pal(11, 'Spectral' ))
+    colors <- colfunc(256)
+    if(rev_colors){colors <- rev(colors)}
+    p <- p +
+      labs(fill = feature) +
+      scale_fill_gradientn(colors=colors, limits = plot_range) +
+      coord_equal() +
+      ggtitle(plot_label) +
+      theme(
+        plot.title = element_text(hjust=0.5, face='plain', size=text_size),
+        axis.line=element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        panel.background=element_blank(),
+        panel.border=element_blank(),
+        panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+        plot.background=element_blank()
+        
+      )
+    
+    plot_list[[cur_sample]] <- p
+    
+  }
+  
+  
+  if(length(plot_list) == 1){
+    return(plot_list[[1]])
+  } else if(!combine){
+    return(plot_list)
+  }
+  else {
+    patch <- wrap_plots(plot_list, ncol=ncol, widths=1, heights=1) +
+      plot_layout(guides='collect') +
+      plot_annotation(title = feature) &  theme(plot.title = element_text(hjust=0.5),)
+  }
+  patch
+}
+
+ModuleNetworkPlot_mod <- function (seurat_obj, n_inner = 10, n_outer = 15, n_conns = 500, 
+                                   mods = "all", outdir = "ModuleNetworks", wgcna_name = NULL, 
+                                   plot_size = c(6, 6), edge.alpha = 0.25, edge.width = 1, vertex.label.cex = 1, 
+                                   vertex.size = 6, ...) 
+{
+  if (is.null(wgcna_name)) {
+    wgcna_name <- seurat_obj@misc$active_wgcna
+  }
+  modules <- GetModules(seurat_obj, wgcna_name)
+  if (all("all" %in% mods)) {
+    mods <- levels(modules$module)
+    mods <- mods[mods != "grey"]
+  }
+  else {
+    if (!all(mods %in% unique(as.character(modules$module)))) {
+      stop(paste0("Some selected modules are not found in wgcna_name: ", 
+                  wgcna_name))
+    }
+    modules <- modules %>% subset(module %in% mods)
+  }
+  if (!all(paste0("kME_", as.character(mods)) %in% colnames(modules))) {
+    stop("Eigengene-based connectivity (kME) not found. Did you run ModuleEigengenes and ModuleConnectivity?")
+  }
+  if (!dir.exists(outdir)) {
+    dir.create(outdir)
+  }
+  cat(paste0("Writing output files to ", outdir))
+  TOM <- GetTOM(seurat_obj, wgcna_name)
+  n_hubs <- n_inner + n_outer
+  hub_df <- GetHubGenes(seurat_obj, n_hubs = n_hubs, wgcna_name = wgcna_name)
+  for (cur_mod in mods) {
+    cur_color <- "black"
+    cur_genes <- subset(hub_df, module == cur_mod) %>% .$gene_name
+    n_genes <- length(cur_genes)
+    if (n_genes < (n_inner + 1)) {
+      print(paste0("Skipping ", cur_mod, ", too few genes to plot."))
+      next
+    }
+    print(cur_mod)
+    cur_kME <- paste0("kME_", cur_mod)
+    matchind <- match(cur_genes, colnames(TOM))
+    reducedTOM <- TOM[matchind, matchind]
+    orderind <- order(reducedTOM, decreasing = TRUE)
+    if (n_conns > ncol(reducedTOM)^2) {
+      cur_n_conns <- ncol(reducedTOM)^2
+    }
+    else {
+      cur_n_conns <- n_conns
+    }
+    connections2keep <- orderind[1:cur_n_conns]
+    connections2drop <- orderind[n_conns + 1:length(orderind)]
+    reducedTOM[connections2drop] <- 0
+    reducedTOM <- scale01(reducedTOM)
+    edge_df <- reducedTOM %>% reshape2::melt()
+    edge_df$color_alpha <- alpha(cur_color, alpha = edge_df$value)
+    gA <- graph.adjacency(as.matrix(reducedTOM[1:n_inner, 
+                                               1:n_inner]), mode = "undirected", weighted = TRUE, 
+                          diag = FALSE)
+    gB <- graph.adjacency(as.matrix(reducedTOM[(n_inner + 
+                                                  1):n_genes, (n_inner + 1):n_genes]), mode = "undirected", 
+                          weighted = TRUE, diag = FALSE)
+    layoutCircle <- rbind(layout.circle(gA)/2, layout.circle(gB))
+    g1 <- igraph::graph_from_data_frame(edge_df, directed = FALSE)
+    pdf(paste0(outdir, "/", cur_mod, ".pdf"), width = plot_size[1], 
+        height = plot_size[2], useDingbats = FALSE)
+    plot(g1, edge.color = adjustcolor(igraph::E(g1)$color_alpha, 
+                                      alpha.f = edge.alpha), edge.curved = 0, edge.width = edge.width, 
+         vertex.color = "white", vertex.label = as.character(cur_genes), 
+         vertex.label.dist = 1.1, vertex.label.degree = -pi/4, 
+         vertex.label.color = "black", vertex.label.family = "Helvetica", 
+         vertex.label.font = 3, vertex.label.cex = vertex.label.cex, 
+         vertex.frame.color = colorspace::lighten("black",amount = 0.4), layout = jitter(layoutCircle), 
+         vertex.size = vertex.size, main = paste(cur_mod))
+    dev.off()
+  }
+}
+
+PlotLollipop <- function(modules, cur_DMEs, pvalue, avg_log2FC = 'avg_log2FC'){
+  #
+  # cur_DMEs <- DMEs
+  modules$module <- gsub("_","-",modules$module)
+  cur_DMEs$module <- gsub("_","-",cur_DMEs$module)
+  # set plotting attributes for shape
+  cur_DMEs$shape <- ifelse(cur_DMEs[[pvalue]] < 0.05, 21, 4) # 21 cicle; 4 X
+  cur_DMEs <- cur_DMEs %>% dplyr::arrange(avg_log2FC, descending=TRUE)
+  cur_DMEs$module <- factor(as.character(cur_DMEs$module), levels=as.character(cur_DMEs$module))
+  
+  # add number of genes per module
+  n_genes <- table(modules$module)
+  cur_DMEs$n_genes <- as.numeric(n_genes[as.character(cur_DMEs$module)])
+  
+  mod_colors <- dplyr::select(modules, c(module, color)) %>% dplyr::distinct()
+  cp <- mod_colors$color; names(cp) <- mod_colors$module
+  
+  p <- cur_DMEs %>%
+    ggplot(aes(y=module, x=avg_log2FC, size=log(n_genes), color=module)) +
+    geom_vline(xintercept=0, color='black') +
+    geom_segment(aes(y=module, yend=module, x=0, xend=avg_log2FC), linewidth=0.5, alpha=0.3) +
+    geom_point() +
+    geom_point(shape=cur_DMEs$shape, color='black', fill=NA) +
+    scale_color_manual(values=cp, guide='none') +
+    ylab('') +
+    xlab(bquote("Avg. log"[2]~"(Fold Change)")) +
+    theme(
+      axis.line.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      plot.title = element_text(hjust=0.5, face='plain', size=10)
+    )
+  
+  return(p)
+  
+}
+
+#
+PlotDMEsLollipop_mod <- function (seurat_obj, DMEs, wgcna_name, group.by = NULL, comparison = NULL, 
+                                  pvalue, avg_log2FC = "avg_log2FC") 
+{
+  if (!require("ggforestplot")) {
+    print("Missing package: ggforestplot")
+    print("Installing package: ggforestplot")
+    devtools::install_github("NightingaleHealth/ggforestplot")
+  }
+  if (!(pvalue %in% colnames(DMEs))) {
+    stop("Selected pvalue is not found in DMEs dataframe column names.")
+  }
+  if (missing(wgcna_name) || !(wgcna_name %in% names(seurat_obj@misc))) {
+    stop("Please provide wgcna_name or the selected wgcna_name is not found in seurat_obj@misc.")
+  }
+  modules <- GetModules(seurat_obj, wgcna_name) %>% subset(module != 
+                                                             "grey") %>% mutate(module = droplevels(module))
+  if (!missing(group.by) & !missing(comparison)) {
+    comparisons <- comparison
+    if (!(all(comparisons %in% DMEs[[group.by]]))) {
+      stop("Not all selected comparisons are not found in DMEs[[group.by]] or the comparison column, DMEs[[group.by]], is not correctly supplied.")
+    }
+    plot_list <- list()
+    for (cur_comp in comparisons) {
+      print(cur_comp)
+      cur_DMEs <- subset(DMEs, DMEs[[group.by]] == cur_comp)
+      cur_title <- cur_comp
+      p <- PlotLollipop(modules, cur_DMEs, pvalue, avg_log2FC = "avg_log2FC")
+      p <- p + ggtitle(cur_title) + NoLegend() + ggforestplot::geom_stripes(aes(y = module), 
+                                                                            inherit.aes = FALSE, data = cur_DMEs)
+      plot_list[[cur_comp]] <- p
+    }
+  }
+  else if (missing(group.by) && !missing(comparison)) {
+    stop("The group.by column is not provided in the DMEs data, and comparison cannot be found.")
+  }
+  else if (!missing(group.by) && missing(comparison)) {
+    if (!(group.by %in% names(DMEs))) {
+      stop("The group.by column is not found in the DMEs data.")
+    }
+    comparisons <- unique(DMEs[[group.by]])
+    plot_list <- list()
+    for (cur_comp in comparisons) {
+      print(cur_comp)
+      cur_DMEs <- subset(DMEs, DMEs[[group.by]] == cur_comp)
+      cur_title <- cur_comp
+      p <- PlotLollipop(modules, cur_DMEs, pvalue, avg_log2FC = "avg_log2FC")
+      p <- p + ggtitle(cur_title) + NoLegend() + ggforestplot::geom_stripes(aes(y = module), 
+                                                                            inherit.aes = FALSE, data = cur_DMEs)
+      plot_list[[cur_comp]] <- p
+    }
+  }
+  else {
+    print("Please be aware comparison group/groups are not provided, which may casue an ERROR. PlotDMEsLollipop function will automatically assume all values are within the same group.")
+    plot_list <- list()
+    cur_DMEs <- DMEs
+    p <- PlotLollipop(modules, cur_DMEs, pvalue, avg_log2FC = "avg_log2FC")
+    p <- p + NoLegend() + ggforestplot::geom_stripes(aes(y = module), 
+                                                     inherit.aes = FALSE, data = cur_DMEs)
+    plot_list <- p
+  }
+  return(plot_list)
+}
+
+#
+PlotDMEsVolcano_mod <- function (seurat_obj, DMEs, plot_labels = TRUE, mod_point_size = 4, 
+                                 label_size = 4, show_cutoff = TRUE, wgcna_name = NULL, xlim_range = NULL, 
+                                 ylim_range = NULL) 
+{
+  if (is.null(wgcna_name)) {
+    wgcna_name <- seurat_obj@misc$active_wgcna
+  }
+  DMEs <- na.omit(DMEs)
+  lowest <- DMEs %>% subset(p_val_adj != 0) %>% top_n(-1, wt = p_val_adj) %>% 
+    .$p_val_adj
+  DMEs$p_val_adj <- ifelse(DMEs$p_val_adj == 0, lowest, DMEs$p_val_adj)
+  max_fc <- DMEs %>% subset(abs(avg_log2FC) != Inf) %>% .$avg_log2FC %>% abs %>%
+    max
+  print(max_fc)
+  DMEs$avg_log2FC <- ifelse(DMEs$avg_log2FC == -Inf, -1 * max_fc, 
+                            DMEs$avg_log2FC)
+  DMEs$avg_log2FC <- ifelse(DMEs$avg_log2FC == Inf, max_fc, 
+                            DMEs$avg_log2FC)
+  modules <- GetModules(seurat_obj, wgcna_name) %>% subset(module != 
+                                                             "grey") %>% mutate(module = droplevels(module))
+  module_colors <- modules %>% dplyr::select(c(module, color)) %>% dplyr::distinct()
+  mods <- levels(modules$module)
+  mods <- mods[mods %in% DMEs$module]
+  mod_colors <- module_colors$color
+  names(mod_colors) <- as.character(module_colors$module)
+  DMEs$anno <- ifelse(DMEs$p_val_adj < 0.05, DMEs$module, "")
+  if (is.null(xlim_range)) {
+    xmax <- max_fc
+    xlim_range <- c((-1 * xmax) - 0.1, xmax + 0.1)
+    print(xlim_range)
+  }
+  if (is.null(ylim_range)) {
+    ymax <- max(-log10(DMEs$p_val_adj))
+    ylim_range <- c(0, ymax + 1)
+  }
+  p <- DMEs %>% ggplot(aes(x = avg_log2FC, y = -log10(p_val_adj), 
+                           fill = module, color = module))
+  if (show_cutoff) {
+    p <- p + geom_vline(xintercept = 0, linetype = "dashed", 
+                        color = "grey75", alpha = 0.8) + geom_rect(data = DMEs[1, 
+                        ], aes(xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = -log10(0.05)), 
+                        fill = "grey75", alpha = 0.8, color = NA)
+  }
+  p <- p + geom_point(size = mod_point_size, pch = 21, color = "black")
+  if (plot_labels) {
+    p <- p + ggrepel::geom_text_repel(aes(label = anno), 
+                                      color = "black", min.segment.length = 0, max.overlaps = Inf, size = label_size)
+  }
+  mod_colors<-mod_colors[order(names(mod_colors))]
+  p <- p + scale_fill_manual(values = as.character(mod_colors)) + scale_color_manual(values = as.character(mod_colors)) + 
+    xlim(xlim_range) + ylim(ylim_range) + xlab(bquote("Average log"[2] ~ 
+                                                        "(Fold Change)")) + ylab(bquote("-log"[10] ~ "(Adj. P-value)")) + 
+    theme(panel.border = element_rect(color = "black", fill = NA, 
+                                      linewidth = 1), panel.grid.major = element_blank(), axis.line = element_blank(), 
+          plot.title = element_text(hjust = 0.5), legend.position = "bottom") + 
+    NoLegend()
+  p_final <<- p
+  return(p)
+}
+
+ResetModuleNames_mod<-function (seurat_obj, new_name = "M", reset_levels = FALSE, wgcna_name = NULL) 
+{
+  if (is.null(wgcna_name)) {
+    wgcna_name <- seurat_obj@misc$active_wgcna
+  }
+  CheckWGCNAName(seurat_obj, wgcna_name)
+  modules <- GetModules(seurat_obj, wgcna_name)
+  old_mods <- levels(modules$module)
+  if ("grey" %in% modules$module) {
+    nmods <- length(old_mods) - 1
+  }else {
+    nmods <- length(old_mods)
+  }
+  if (class(new_name) == "list") {
+    if (all(names(new_name) %in% old_mods)) {
+      ix <- match(names(new_name), old_mods)
+      new_names <- old_mods
+      new_names[ix] <- as.character(new_name)
+      new_names <- new_names[new_names != "grey"]
+    }else {
+      stop("Some module names present in new_name are not found in this hdWGCNA experiment.")
+    }
+  }else if (length(new_name) == 1) {
+    new_names <- paste0(new_name, 1:nmods)
+  }else if (length(new_name) == nmods) {
+    new_names <- new_name
+  }else {
+    stop("Invalid input for new_name.")
+  }
+  if ("grey" %in% modules$module) {
+    grey_ind <- which(old_mods == "grey")
+    if (grey_ind == 1) {
+      new_names <- c("grey", new_names)
+    }else if (grey_ind == length(old_mods)) {
+      new_names <- c(new_names, "grey")
+    }else {
+      new_names <- c(new_names[1:(grey_ind - 1)], "grey", 
+                     new_names[grey_ind:length(new_names)])
+    }
+  }
+  new_kMEs <- paste0("kME_", new_names)
+  #colnames(modules) <- c(colnames(modules)[1:3], new_kMEs)
+  new_mod_df <- data.frame(old = old_mods, new = new_names)
+  modules$module <- factor(new_mod_df[match(modules$module, 
+                                            new_mod_df$old), "new"], levels = as.character(new_mod_df$new))
+  seurat_obj <- SetModules(seurat_obj, modules, wgcna_name)
+  hMEs <- GetMEs(seurat_obj, harmonized = TRUE, wgcna_name)
+  if (!is.null(hMEs)) {
+    me_colnames <- colnames(hMEs)
+    ix <- match(me_colnames, new_mod_df$old)
+    colnames(hMEs) <- new_mod_df$new[ix]
+    seurat_obj <- SetMEs(seurat_obj, hMEs, harmonized = TRUE, 
+                         wgcna_name)
+  }
+  MEs <- GetMEs(seurat_obj, harmonized = FALSE, wgcna_name)
+  if (!is.null(MEs)) {
+    me_colnames <- colnames(MEs)
+    ix <- match(me_colnames, new_mod_df$old)
+    colnames(MEs) <- new_mod_df$new[ix]
+    seurat_obj <- SetMEs(seurat_obj, MEs, harmonized = FALSE, 
+                         wgcna_name)
+  }
+  module_scores <- GetModuleScores(seurat_obj, wgcna_name)
+  if (!is.null(module_scores)) {
+    if (!("grey" %in% colnames(module_scores))) {
+      colnames(module_scores) <- new_mod_df$new[new_mod_df$new != 
+                                                  "grey"]
+    }
+    else {
+      colnames(module_scores) <- new_mod_df$new
+    }
+    seurat_obj <- SetModuleScores(seurat_obj, module_scores, 
+                                  wgcna_name)
+  }
+  avg_exp <- GetAvgModuleExpr(seurat_obj, wgcna_name)
+  if (!is.null(avg_exp)) {
+    if (!("grey" %in% colnames(avg_exp))) {
+      colnames(avg_exp) <- new_mod_df$new[new_mod_df$new != 
+                                            "grey"]
+    }
+    else {
+      colnames(avg_exp) <- new_mod_df$new
+    }
+    seurat_obj <- SetAvgModuleExpr(seurat_obj, avg_exp, wgcna_name)
+  }
+  enrich_table <- GetEnrichrTable(seurat_obj, wgcna_name)
+  if (!is.null(enrich_table)) {
+    enrich_table$module <- factor(new_mod_df[match(enrich_table$module, 
+                                                   new_mod_df$old), "new"], levels = as.character(new_mod_df$new))
+    seurat_obj <- SetEnrichrTable(seurat_obj, enrich_table, 
+                                  wgcna_name)
+  }
+  overlap_df <- GetMotifOverlap(seurat_obj, wgcna_name)
+  if (!is.null(overlap_df)) {
+    overlap_df$module <- factor(new_mod_df[match(overlap_df$module, 
+                                                 new_mod_df$old), "new"], levels = as.character(new_mod_df$new))
+    seurat_obj <- SetMotifOverlap(seurat_obj, overlap_df, 
+                                  wgcna_name)
+  }
+  umap_df <- GetModuleUMAP(seurat_obj, wgcna_name)
+  if (!is.null(umap_df)) {
+    umap_df$module <- factor(new_mod_df[match(umap_df$module, 
+                                              new_mod_df$old), "new"], levels = as.character(new_mod_df$new))
+    seurat_obj <- SetModuleUMAP(seurat_obj, umap_df, wgcna_name)
+  }
+  seurat_obj
+}
+
+```
+
+## 1.1. Loading files
+
+First, we need to load all relevant information for our samples. In this case we'll import the seurat object that was obtained in previous steps. We need then to add the information in the images field to be able to use the seurat plotting functions and we need to add the coordinates of the spots in the metadata field (required by hdWGCNA).
+
+```{r}
+#setting input/output variables
+out_prefix_name="spruce_Acrocona_Female_subset_consensus"
+
+#final variables that are going to be used
+input_directory="/path/to/raw/data/"
+out_directory="/path/to/out_data/Acr_Fem_subset/harmonized_ME/consensus/"
+dir.create(out_directory)
+```
+
+The following section was used to generate input data
+
+```{r, eval=FALSE}
+#starting from the Seurat objec with separate samples in order to be able to add coordinates columns
+raw_input_file_anno <- readRDS(file=paste0(input_directory,"spruce_merged_PCA_harmony_Umap_FindNeigh_findClusters.rds"))
+
+list.obj=list()
+for (sample_name in unique(sort(raw_input_file_anno$section_id)))
+{
+  current_sample_obj<-subset(x = raw_input_file_anno, subset = section_id == sample_name)
+  tmp_obj<-CreateSeuratObject(counts=GetAssay(current_sample_obj, assay = "RNA"), assay = "Spatial", meta.data = current_sample_obj@meta.data)
+  
+  barcode_number=str_remove(rownames(current_sample_obj@meta.data[1,]), pattern = ".*_1_")
+  
+  tmp_obj$barcode<-rownames(tmp_obj@meta.data)
+  #tmp_obj$barcode<-gsub("_1",paste0("_",barcode_number),rownames(tmp_obj@meta.data))
+  #rownames(tmp_obj@meta.data)<-tmp_obj$barcode
+  
+  tmp_obj@images$spatial_feat <- Read10X_Image(image.dir = paste0(input_directory,"reformatted_data/",sample_name,"/spatial"), image.name = "tissue_lowres_image.png", assay = "Spatial", slice = unique(paste0(tmp_obj$bud,"_",tmp_obj$section_id)))
+  #tmp_obj@images$spatial_feat <- Read10X_Image(image.dir = paste0(input_directory,"test/",sample_name,"/spatial"), image.name = "tissue_lowres_image.png", assay = "Spatial", slice = sample_name)
+  #re-naming the list
+  tmp_obj@images<-setNames(tmp_obj@images, unique(paste0(tmp_obj$bud,"_",tmp_obj$section_id)))
+  
+  tmp_obj@images[[1]]@boundaries$centroids@cells <- gsub("-1",paste0("_1_",barcode_number),tmp_obj@images[[1]]@boundaries$centroids@cells)
+  
+  #filtering for the spots that belong to the i-th sample from the metadata 
+  spot.name<-sort(names(tmp_obj$barcode))
+  
+  #selecting the rows
+  points.to.keep=which(tmp_obj@images[[1]]@boundaries$centroids@cells %in% spot.name)
+  
+  #filtering the selected rows in the coords field of images
+  tmp_obj@images[[1]]@boundaries$centroids@coords <- tmp_obj@images[[1]]@boundaries$centroids@coords[points.to.keep,]
+  
+  #filtering the selected rows in the cells field of images
+  tmp_obj@images[[1]]@boundaries$centroids@cells <- tmp_obj@images[[1]]@boundaries$centroids@cells[points.to.keep]
+  
+  #now we want to extract the information of the coordinates
+  tissue_positions <- read.csv(paste0(input_directory,"reformatted_data/",sample_name,"/spatial/tissue_positions.csv"), header = FALSE)
+  #}
+  #correcting the name of the barcode
+  colnames(tissue_positions)<- c("barcode",	"in_tissue",	"array_row",	"array_col",	"pxl_row_in_fullres",	"pxl_col_in_fullres")
+  
+  tissue_positions$barcode<-gsub("-1",paste0("_1_",barcode_number),tissue_positions$barcode)
+  
+  tissue_positions <- subset(tissue_positions, barcode %in% sort(tmp_obj$barcode))
+  
+  # join the dataset with the Seurat metadata
+  new_meta <- dplyr::left_join(tmp_obj@meta.data, tissue_positions, by='barcode')
+  
+  # add the new metadata to the Seurat object
+  tmp_obj$row <- new_meta$array_row 
+  tmp_obj$imagerow <- new_meta$pxl_row_in_fullres
+  tmp_obj$col <- new_meta$array_col
+  tmp_obj$imagecol <- new_meta$pxl_col_in_fullres
+  
+  tmp_obj<-SetIdent(tmp_obj, value = "barcode")
+  #have to rename cell names otherwise the merging step is not working
+  #colnames(tmp_obj[["Spatial"]])<-tmp_obj$barcode
+  
+  list.obj[[sample_name]]<-tmp_obj
+  
+}
+
+input_merged<-merge(list.obj[[1]], list.obj[2:length(list.obj)])
+
+#adding the reductions from previous steps
+input_merged@reductions<-raw_input_file_anno@reductions
+
+#saving object for later analysis
+saveRDS(input_merged, file=paste0(input_directory,"spruce_compatible_obj.all_samples.rds"))
+rm(raw_input_file_anno)
+```
+
+Subsetting the object for taking just the samples belonging to one specific group.
+```{r}
+input_merged<-readRDS(file=paste0(input_directory,"spruce_compatible_obj.all_samples.rds"))
+our_seurat_obj <- subset(x = input_merged, subset = stage == "Acro" | stage == "Fem")
+# set factor level for sample
+our_seurat_obj$sample <- factor(as.character(paste0(our_seurat_obj$bud,"_",our_seurat_obj$section_id)), levels=unique(paste0(our_seurat_obj$bud,"_",our_seurat_obj$section_id)))
+```
+
+We also split the object in order to have splitted _count_ slots for the normalization step.
+
+```{r}
+#splitting object
+our_seurat_obj[["Spatial"]]<-split(our_seurat_obj[["Spatial"]], f = our_seurat_obj$sample)
+#removing "data" slot to be sure that the new normalized data is going to be saved correctly
+for (data_field in grep("data", Layers(our_seurat_obj[["Spatial"]]), value=TRUE))
+{
+  LayerData(our_seurat_obj, assay = "Spatial", layer = data_field) <- NULL
+  print(paste0(data_field," removed."))
+}
+```
+
+## 1.2. Normalizaion, variable features and scaling of dataset:
+These steps are optional if later the Module Eigengenes are not calculated with the harmonized version, otherwise the scale.data field is required. 
+For the next steps, raw counts are going to be used for the generation of the co-expression network.
+
+```{r}
+our_seurat_obj.norm <- our_seurat_obj %>%
+  NormalizeData() %>%
+  FindVariableFeatures() %>%
+  ScaleData()
+```
+
+At this point, we can join the layers in order to have just one "counts" layer and one "data" layer.
+
+```{r}
+our_seurat_obj.norm.joined<-JoinLayers(our_seurat_obj.norm, assay = 'Spatial')
+# set factor level for sample
+#our_seurat_obj.norm.joined$sample <- factor(as.character(paste0(our_seurat_obj.norm.joined$bud,"_",our_seurat_obj.norm.joined$section_id)), levels=unique(paste0(our_seurat_obj.norm.joined$bud,"_",our_seurat_obj.norm.joined$section_id)))
+```
+
+Optional part
+```{r, eval=FALSE}
+our_seurat_obj.norm.joined<- RunPCA(our_seurat_obj.norm.joined, seed.use = 39, npcs = 50, reduction.name = "pca_new")
+ElbowPlot(object = our_seurat_obj.norm.joined, ndims = 50, reduction = "pca_new")
+
+our_seurat_obj.norm.joined <- FindNeighbors(our_seurat_obj.norm.joined, k.param = 23, reduction="pca_new")
+our_seurat_obj.norm.joined <- FindClusters(our_seurat_obj.norm.joined, verbose = TRUE, resolution=1.2, group.singletons = TRUE, random.seed = 17, cluster.name = "new_clusters")
+our_seurat_obj.norm.joined <- RunUMAP(our_seurat_obj.norm.joined, dims = 1:40, seed.use = 1843, reduction="pca_new", reduction.name = "umap_new")
+```
+
+Checking the results of the clustering:
+```{r, fig.width=20, fig.height=10, fig.show='hold', eval=FALSE}
+p.new.clusters <- DimPlot(our_seurat_obj.norm.joined, label=T, reduction = "umap_new", group.by = "new_clusters", alpha = 0.5) + ggtitle("spots grouped by new_clusters")
+p.new.anno <- DimPlot(our_seurat_obj.norm.joined, label=F, reduction = "umap_new", group.by = "annot_cl", alpha = 0.5) + ggtitle("spots grouped by annot_cl")
+p.new.sample <- DimPlot(our_seurat_obj.norm.joined, label=F, reduction = "umap_new", group.by = "sample", alpha = 0.5) + ggtitle("spots grouped by sample")
+p.new.timepoint <- DimPlot(our_seurat_obj.norm.joined, label=F, reduction = "umap_new", group.by = "timepoint", alpha = 0.5) + ggtitle("spots grouped by timepoint")
+p.new.array <- DimPlot(our_seurat_obj.norm.joined, label=F, reduction = "umap_new", group.by = "array_id", alpha = 0.5) + ggtitle("spots grouped by array")
+wrap_plots(wrap_plots(p.new.clusters,p.new.anno,p.new.timepoint, ncol=3),(p.new.array-p.new.sample), ncol=1)
+
+#using pre-existing clustering and UMAP
+p.clusters <- DimPlot(our_seurat_obj.norm.joined, label=T, reduction = "umap", group.by = "seurat_clusters", alpha = 0.5) + ggtitle("spots grouped by seurat_clusters")
+p.anno <- DimPlot(our_seurat_obj.norm.joined, label=F, reduction = "umap", group.by = "annot_cl", alpha = 0.5) + ggtitle("spots grouped by annot_cl")
+p.sample <- DimPlot(our_seurat_obj.norm.joined, label=F, reduction = "umap", group.by = "sample", alpha = 0.5) + ggtitle("spots grouped by sample")
+p.timepoint <- DimPlot(our_seurat_obj.norm.joined, label=F, reduction = "umap", group.by = "timepoint", alpha = 0.5) + ggtitle("spots grouped by timepoint")
+p.array <- DimPlot(our_seurat_obj.norm.joined, label=F, reduction = "umap", group.by = "array_id", alpha = 0.5) + ggtitle("spots grouped by array")
+wrap_plots(wrap_plots(p.clusters,p.anno,p.timepoint, ncol=3),(p.array-p.sample), ncol=1)
+```
+
+Checking the object by plotting the annotation and clusters in the spatial field.
+```{r, fig.width=6, fig.height=6, fig.show='hold'}
+# show the UMAP
+DimPlot(our_seurat_obj.norm.joined, label=FALSE, reduction = "umap", group.by = "annot_cl", alpha = 0.6, order = ) + ggtitle("Annotated tissues")
+```
+
+```{r, fig.width=40, fig.height=40, fig.show='hold'}
+# set idents
+Idents(our_seurat_obj.norm.joined) <- our_seurat_obj.norm.joined$annot_cl
+#sorting for better plots
+levels(our_seurat_obj.norm.joined@active.ident)<-str_sort(levels(our_seurat_obj.norm.joined@active.ident), numeric = TRUE)
+#levels(our_seurat_obj.norm.joined$sample)<-sort(levels(our_seurat_obj.norm.joined$sample))
+#manual_palette<-c("#417ec2","#e41e26","#118c44","#6b3f98","#f5801f","gray47","#fcd802","#82bfe9","#f59999","#9dd18a","#cab3d5","#fdbf6f","#b3b4b4","#ede885","#b13061","#d58ebd",
+#                  "#ec2192","#3954a4","#36668c","#6abd45","#8b8d35")
+
+jpeg(paste0(out_directory,out_prefix_name,".spatialplot_annotation.jpeg"), units = "cm", res=600, width=80, height=70)
+SpatialDimPlot(our_seurat_obj.norm.joined, label = TRUE, label.size = 3.5, ncol = 8, pt.size.factor = 4.6, repel = 4)
+dev.off()
+```
+
+Saving the object:
+```{r}
+saveRDS(our_seurat_obj.norm.joined,file=paste0(out_directory,out_prefix_name ,".annotated.rds")) 
+```
+
+## 2. Consensus analysis
+## 2.1. Generation of the co-expression network with hdWGCNA
+
+Use the saved object for the consensus pathway analysis:
+```{r}
+spruce_Acrocona_Female_subset.annotated <- readRDS(file="/path/to/out_data/Acr_Fem_subset/harmonized_ME/spruce_Acrocona&Female_subset.annotated.rds")
+spruce_Acrocona_Female_subset.annotated@meta.data
+```
+
+Preliminary analysis: checking for markers for each cluster (optional).
+```{r, fig.width=23, fig.height=18, fig.show='hold'}
+#changing name
+sub_obj<-spruce_Acrocona_Female_subset.annotated
+#rm(our_seurat_obj.norm.joined)
+#searching markers for each of the clusters
+markers_anno <- FindAllMarkers(sub_obj, assay = "Spatial", random.seed = 19, min.pct = 0.1, only.pos = TRUE, min.cells.group = 1, group.by = "ident")
+head(markers_anno)
+#write.csv(markers_anno_1.2, file = paste0(out_directory,out_prefix_name,"_annoMarkers.csv", col.names = TRUE, row.names = TRUE)
+
+#selecting top5 clusters and plotting
+markers_anno_top5 <- markers_anno %>%
+  group_by(cluster) %>%
+  filter(p_val_adj < 0.01) %>%
+  filter(row_number() %in% 1:5)
+d_anno <- DotPlot(sub_obj, features = unique(markers_anno_top5$gene) %>% rev()) + 
+  coord_flip() + 
+  scale_colour_gradientn(colours = RColorBrewer::brewer.pal(n = 11, name = "RdBu") %>% rev()) + labs(y = "annot_cl") + guides(x =  guide_axis(angle = 45))
+d_anno
+#ggsave(d_anno, filename = paste0(out_directory, out_prefix_name,".annoMarkers.top5.jpeg"),dpi = 300, width = 15, height = 18)
+
+#checking the expression of "--no-feature" 
+SpatialFeaturePlot(sub_obj,feature="--no-feature", ncol=8, pt.size.factor = 4)
+
+```
+
+We then want to subset again the object to remove the spots annotated as unclassified.
+```{r, fig.width=40, fig.height=40, fig.show='hold'}
+sub_obj<- subset(x = sub_obj, subset = annot_cl != "14-Unclassified" & annot_cl != "15-Unclassified")
+
+Idents(sub_obj) <- sub_obj$annot_cl
+#sorting for better plots
+levels(sub_obj@active.ident)<-str_sort(levels(sub_obj@active.ident), numeric = TRUE)
+
+jpeg(paste0(out_directory,out_prefix_name,".spatialplot_annotation.no_unclassified.jpeg"), units = "cm", res=600, width=80, height=70)
+SpatialDimPlot(sub_obj, label = TRUE, label.size = 3.5, ncol = 8, pt.size.factor = 4.6, repel = 4)
+dev.off()
+
+SpatialFeaturePlot(sub_obj, pt.size.factor = 4.6, features = "nCount_Spatial", ncol=8)
+```
+
+## 2.2. Metaspots generation
+
+We now initiate the hdWGCNA pipeline by first generating metaspots. To do this, we group the metaspots by sample. By default, the *"counts"* layer is used to generate the new expression values, ensuring that the metaspots reflect the aggregated gene expression across the grouped cells.
+
+```{r, warning=FALSE}
+sub_obj <- SetupForWGCNA(
+  sub_obj,
+  gene_select = "fraction",
+  fraction = 0.05,
+  wgcna_name = "consensus"
+)
+
+#generation of metaspots
+sub_obj <- MetaspotsByGroups(
+  sub_obj,
+  group.by = c("sample", "stage"), #adding "stage" (Fem, Acro) for the consensus network
+  ident.group = "sample",
+  assay = 'Spatial'
+)
+```
+
+Next, we proceed with normalizing the metaspots to ensure that the expression values are comparable across samples and to minimize any technical variation that may affect downstream analysis.
+
+```{r}
+sub_obj  <- NormalizeMetacells(sub_obj)
+
+#we can also retrieve the metaspot object
+meta_sub_obj <- GetMetacellObject(sub_obj)
+meta_sub_obj
+```
+
+## 2.3. Co-expression analysis
+
+Next, we perform the co-expression analysis. We begin by setting up the co-expression matrix, followed by testing for the optimal softpower threshold to achieve a scale-free topology. Running this command ensures that the best threshold parameter is stored and automatically applied in subsequent steps.
+
+If a specific group is specified (e.g., tissue annotation from the metadata), the analysis can be restricted to a subset of spots. In this case, we will run the analysis for the entire sample.
+
+Specific modifications for the consensus analysis: 
+- Using SetMultiExpr instead of SetDatExpr, to set up a separate expression matrix for Female and Acrocona buds.
+- Instead of the TestSoftPowers function which we use in the standard hdWGCNA workflow, we use TestSoftPowersConsensus, which will perform the test for each of the expression matrices. When we plot the results with PlotSoftPowers, we get a nested list of plots for each dataset, and we can assemble the plots using patchwork.
+
+```{r fig.height=5, fig.show='hold', fig.width=15, message=FALSE}
+# set up the expression matrix, set group.by and group_name to NULL to include all spots
+sub_obj  <- SetMultiExpr(
+  sub_obj,
+  group.by=NULL,
+  group_name = NULL,
+  multi.group.by ="stage",
+  multi_groups = NULL,
+  assay='Spatial'
+)
+
+# test different soft power thresholds
+sub_obj <- TestSoftPowersConsensus(sub_obj)
+plot_list <- PlotSoftPowers(sub_obj)
+
+#it can be good to check the results by plotting the Softpower values
+#wrap_plots(plot_list, ncol=4)
+
+# get just the scale-free topology fit plot for each group
+consensus_groups <- unique(sub_obj$stage)
+p_list <- lapply(1:length(consensus_groups), function(i){
+  cur_group <- consensus_groups[[i]]
+  plot_list[[i]][[1]] + ggtitle(paste0('Stage: ', cur_group)) + theme(plot.title=element_text(hjust=0.5))
+})
+
+wrap_plots(p_list, ncol=2)
+```
+
+At this point we can build the co-expression network with the chosen soft-power threshold.
+
+Specifying consensus=TRUE tells hdWGCNA to construct a separate network for each expression matrix, followed by integrating the networks and identifying gene modules. 
+```{r, message=FALSE}
+# construct co-expression network:
+sub_obj <- ConstructNetwork(
+  sub_obj,
+  soft_power=c(7,8), #from the plots above
+  consensus=TRUE,
+  tom_name='Fem_Acro_consensus',
+  overwrite_tom=TRUE
+)
+```
+
+To visualize the co-expression network, we can plot the dendrogram, which illustrates the hierarchical clustering of genes based on their expression patterns. In this visualization, the leaves represent individual genes, and the branches represent the relationships between these genes based on their co-expression. The colored sections of the dendrogram correspond to modules, which are groups of co-expressed genes that show similar expression profiles across the dataset. These modules are typically located at the ends of the branches, where the branches "split" downwards, indicating that genes within the same module are closely related in terms of expression. This structure helps us identify distinct groups of genes that may share biological functions or regulatory mechanisms.
+
+```{r, fig.width=20, fig.height=10, fig.show='hold'}
+jpeg(paste0(out_directory,out_prefix_name,"_dendrogram_consensus.jpeg"), units = "cm", res=600,width=20, height=10)
+PlotDendrogram(sub_obj, main='Spatial hdWGCNA dendrogram - Acrocona & Female samples - Consensus network analysis')
+dev.off()
+
+PlotDendrogram(sub_obj, main='Spatial hdWGCNA dendrogram - Acrocona & Female samples - Consensus network analysis')
+```
+
+To summarize the expression of the co-expression modules for each spot, we calculate the module eigengenes. The module eigengene is the first principal component of the expression profiles of the genes within a module, providing a one-dimensional reduction of the network's gene expression. This allows us to capture the main variation within each module and provides a simplified summary of its overall expression across the dataset.
+
+Additionally, we calculate the connectivity for each gene, in this case with harmonization. Gene connectivity measures how strongly a gene is connected to other genes in the network, helping us identify hub genes—those most connected within their module. Hub genes often play central roles in the regulation of biological processes and can highlight key drivers in the network.
+
+```{r message=FALSE}
+sub_obj <- ModuleEigengenes(sub_obj, group.by.vars = "sample")
+sub_obj <- ModuleConnectivity(sub_obj, harmonized = TRUE)
+```
+
+We then change the names at the modules (i.e. add prefix "SM\_")
+
+```{r}
+#reset module names with SM (spatial modules)
+sub_obj <- ResetModuleNames(
+  sub_obj,
+  new_name = "SM_"
+)
+
+#visualize modules eigengenes
+# get module eigengenes and gene-module assignment tables
+MEs <- GetMEs(sub_obj, harmonized = TRUE)
+modules <- GetModules(sub_obj)
+mods <- levels(modules$module); mods <- mods[mods != 'grey']
+
+mod_dim<-as.data.frame(table(modules$module))
+names(mod_dim)<-c("module","dim")
+write_csv(mod_dim, file=paste0(out_directory,out_prefix_name,".module_dim.csv"))
+
+```
+
+And we add them to the metadata and save them in a file. We also print modules dimension.
+
+```{r}
+# add the MEs to the seurat metadata so we can plot it with Seurat functions
+sub_obj@meta.data <- cbind(sub_obj@meta.data, MEs)
+
+#save them in a file
+for (i in 1:length(mods)){
+  SM_name=paste("SM_",i,sep="")
+  tmp.i <- modules[modules$module==SM_name,c(1:3,i+4)]
+  names(tmp.i)<-c("gene_name","module","color","kME_SM")
+  if (i==1){
+    SM.top0.7.genes<-head(sort_by(tmp.i,tmp.i$kME_SM, decreasing=TRUE),ceiling(dim(tmp.i)[1]*0.7))
+  }else{
+    SM.top0.7.genes<-rbind(SM.top0.7.genes,head(sort_by(tmp.i,tmp.i$kME_SM, decreasing=TRUE),ceiling(dim(tmp.i)[1]*0.7)))
+  }
+  #printing dimension of the module
+  print(paste0(SM_name," - ",dim(head(sort_by(tmp.i,tmp.i$kME_SM, decreasing=TRUE),ceiling(dim(tmp.i)[1])))[1]))
+}
+WriteXLS(SM.top0.7.genes,paste0(out_directory,"SM.70perc.genes.anno_v2.xls"), row.names = FALSE)
+WriteXLS(modules,paste0(out_directory,"SM.all.genes.anno_v2.xls"), row.names = FALSE)
+```
+
+### Plotting the modules
+
+Now, we might want to check if there is any correspondance between tissues and expression of the different modules. First of all we can generate a dotplot:
+
+```{r, fig.width=8, fig.height=10, fig.show='hold'}
+# plot with Seurat's DotPlot function
+
+p4 <- DotPlot(sub_obj,features=mods, dot.min=0.1, group.by = "annot_cl")
+p4 <- p4 +
+  coord_flip() +
+  RotatedAxis() + 
+  scale_color_gradient2(high='red', mid='grey95', low='blue') +
+  xlab('') + ylab('') + scale_y_discrete(limits=c("0-Pith","1-Pith","6-Pith","7-Pith","12-Pith","3-Vasculature","4-Vasculature","9-Vasculature","10-Vasculature","13-Vasculature","5-Lateral Organs Primordia","8-Lateral Organs Primordia","2-Lateral Organs Differentiated","11-Lateral Organs Differentiated"))
+p4
+
+ggsave(p4, filename = paste0(out_directory,out_prefix_name ,".harm.module_eigengenes.anno.by.cluster.jpeg"),dpi = 300, width = 8, height = 10)
+
+#By stage (Fem, Acro)
+p4 <- DotPlot(sub_obj,features=mods, dot.min=0.1, group.by = "stage")
+p4 <- p4 +
+  coord_flip() +
+  RotatedAxis() + 
+  scale_color_gradient2(high='red', mid='grey95', low='blue') 
+p4
+
+ggsave(p4, filename = paste0(out_directory,out_prefix_name ,".harm.module_eigengenes.anno_consensus_Acro_Fem.jpeg"),dpi = 300, width = 8, height = 10)
+```
+
+Or plot the MEs values directly on a spatial plot (consensus version)
+```{r}
+stages <- unique(spruce_Acrocona_Female_subset.annotated@meta.data[["stage"]])
+stages
+timepoints <- unique(spruce_Acrocona_Female_subset.annotated@meta.data[["timepoint"]])
+timepoints
+timepoint_order <- c("Aug", "Sept", "Oct")
+
+plot_list <- list()
+
+for(cur_mod in mods){
+  for(stage in stages){
+
+    message("Processing module: ", cur_mod, " | Stage: ", stage)
+
+    # subset by stage
+    sub_obj_stage <- subset(sub_obj, subset = stage == !!stage)
+
+    # generate plot
+    p <- SampleFeaturePlot(
+      sub_obj_stage,
+      feature = cur_mod,
+      sample_col = "sample",
+      ncol = 10,
+      raster = TRUE,
+      plot_max = "q99",
+      plot_min = 0,
+      colfunc = viridis::inferno,
+      rev_colors = TRUE,
+      dpi = 600
+    )
+    # make titles smaller
+    p <- p + theme(
+      plot.title = element_text(size = 5),   # adjust text size here
+      strip.text = element_text(size = 2)    # for facet labels
+    )
+    
+    # store in nested list
+    plot_list[[cur_mod]][[stage]] <- p
+
+    # save each plot individually
+    ggsave(
+      filename = paste0(out_directory,"spatial_plots/pdf/consensus_plot_", cur_mod, "_stage_", stage, ".pdf"),
+      plot = p,
+      width = 20,
+      height = 8,
+      dpi = 600
+    )
+  }
+}
+
+# optional: combine all into a single wrap_plots object
+all_plots <- wrap_plots(
+  unlist(plot_list, recursive = FALSE),
+  ncol = 1
+)
+
+```
+
+
+We can also check the module distribution in the UMAP space
+
+```{r, fig.width=14, fig.height=8, fig.show='hold'}
+FeaturePlot(sub_obj, features = sort(colnames(sub_obj@misc$consensus$MEs)[grep("grey", colnames(sub_obj@misc$consensus$MEs), invert=TRUE)]), ncol = 3, reduction = "umap")
+```
+
+We might want to plot the harmonized values, with the colour of the modules, in the organization of the UMAP space based con the spot clustering.
+
+```{r, fig.width=6, fig.height=6, fig.show='hold'}
+#manual_palette<-c("#417ec2","#e41e26","#118c44","#6b3f98","#f5801f","gray47","#fcd802","#82bfe9","#f59999","#9dd18a","#cab3d5","#fdbf6f","#b3b4b4","#ede885","#b13061","#d58ebd",
+#                  "#ec2192","#3954a4","#36668c","#6abd45","#8b8d35")
+#cols = manual_palette
+p<-DimPlot(sub_obj, label=T, repel = 1.5, label.size = 3,label.color = "white" ,label.box = TRUE, reduction = "umap", group.by = "annot_cl", alpha = 0.6) + NoLegend()
+p
+ggsave(p, filename = paste0(out_directory,out_prefix_name,".umap.dimplot.anno.jpeg"),dpi = 300, width = 9, height = 8)
+```
+
+```{r, fig.width=14, fig.height=7, fig.show='hold'}
+plot_list<-list()
+plot_list <- ModuleFeaturePlot(
+  sub_obj,
+  features='hMEs', # plot the hMEs
+  order=TRUE, # order so the points with highest hMEs are on top
+  point_size = 0.2,
+  reduction="umap"
+)
+wrap_plots(plot_list, ncol=3)
+
+pdf(paste0(out_directory,out_prefix_name, ".umap.hMEs.pdf"), width=14, height=7)
+wrap_plots(plot_list, ncol=3)
+dev.off()
+```
+
+Another information that we might want to plot is the name of the most connected genes (hub genes) for each module.
+
+```{r, fig.width=16, fig.height=6, fig.show='hold'}
+sub_obj_stage <- subset(sub_obj, subset = stage == !!stage)
+PlotKMEs(sub_obj_stage, ncol=4, text_size = 2, n_hubs = 20)
+PlotKMEs(sub_obj, ncol=4, text_size = 2, n_hubs = 20)
+pdf(paste0(out_directory, out_prefix_name,".kMEs.pdf"), width=16, height=6)
+PlotKMEs(sub_obj_stage, ncol=4, text_size = 2, n_hubs = 20)
+dev.off()
+```
+
+
+Another way of visualizing the network is by plotting it in the UMAP space: each spot will correspond to a gene and genes that are co-expressed will be connected.
+
+```{r, fig.width=10, fig.height=10, fig.show='hold'}
+##visualizing the coexpression network using UMAP
+# perform UMAP embedding on the co-expression network
+sub_obj <- RunModuleUMAP(
+  sub_obj,
+  n_hubs = 5,
+  n_neighbors=15,
+  min_dist=0.3,
+  spread=2,
+  seed=3210
+)
+
+#dim(Mb)*1024^2
+value_Mb=12000*1024^2
+options(future.globals.maxSize= value_Mb)
+
+# make the network plot
+ModuleUMAPPlot(
+  sub_obj,
+  edge.alpha=0.5,
+  sample_edges=TRUE,
+  keep_grey_edges=FALSE,
+  edge_prop=0.1, 
+  label_hubs=5,
+  seed=3210
+)
+```
+
+
+We can first plot the same UMAP plot, with a better node labeling (but without edges).
+
+```{r}
+
+#taken from
+#https://github.com/smorabit/hdWGCNA_paper/blob/main/Figure3/Figure3.Rmd
+# get the hub gene UMAP table from the seurat object
+umap_df <- GetModuleUMAP(sub_obj)
+
+# plot with ggplot
+plot_df <- umap_df
+
+# compute coordinates for cluster labels
+centroid_df <- data.frame()
+for(cur_cluster in unique(plot_df[['module']])){
+  cur_meta <- plot_df[plot_df[['module']] == cur_cluster,]
+  df <- data.frame(
+    cluster = cur_cluster,
+    UMAP1 = mean(cur_meta$UMAP1),
+    UMAP2 = mean(cur_meta$UMAP2)
+  )
+  centroid_df <- rbind(centroid_df, df)
+}
+
+hub_genes <- GetHubGenes(sub_obj, 5)
+
+# add annotation
+anno_genes <- hub_genes$gene_name
+plot_df$anno <- ifelse(plot_df$gene %in% anno_genes, umap_df$gene, '')
+
+plot_df_anno <- subset(plot_df, anno != '')
+p <-  plot_df %>%
+  ggplot(aes(x=UMAP1, y=UMAP2, color=module)) +
+  ggrastr::rasterise(
+    geom_point(
+      inherit.aes=FALSE,
+      data=plot_df,
+      aes(x=UMAP1, y=UMAP2, color=module),
+      color=plot_df$color,
+      size=plot_df$kME*3,
+    ), dpi=800, dpi_scale=0.5) +
+  geom_point(
+    inherit.aes = FALSE,
+    data = plot_df_anno,
+    shape=21, color='black',
+    fill=plot_df_anno$color,
+    size=plot_df_anno$kME*3,
+    aes(x=UMAP1, y=UMAP2, fill=module)
+  ) +
+  ## add labels
+  #ggrepel::geom_text_repel(data = centroid_df, label=centroid_df$cluster, color='black', max.overlaps=Inf, size=2.5, fontface='bold') +
+  
+  geom_text_repel(label=plot_df$anno, max.overlaps=Inf, color='black', fontface='italic', size=2.3) +
+  #  scale_color_manual(values=cp) +
+  #  scale_fill_manual(values=cp) +
+  umap_theme() + NoLegend() +
+  coord_equal() +
+  theme(
+    plot.margin = margin(0,0,0,0)
+  )
+p
+
+pdf(paste0(out_directory,"hubgene_umap_ggplot.pdf"), width=8, height=8)
+print(p)
+dev.off()
+
+
+pdf(paste0(out_directory,"hubgene_umap_ggplot_igraph.pdf"), width=8, height=8)
+ModuleUMAPPlot(
+  sub_obj,
+  edge.alpha=0.5,
+  sample_edges=TRUE,
+  keep_grey_edges=FALSE,
+  edge_prop=0.1,
+  label_hubs = 0,
+  seed=3210
+)
+dev.off()
+
+```
+
+We can also generate a module network in which we plot the 30 most connected genes (10 in the inner circle, and 20 in the outer circle)
+
+```{r}
+dir.create(paste0(out_directory,"ModuleNetworks2"), recursive = T)
+ModuleNetworkPlot_mod(
+  sub_obj, 
+  outdir=paste0(out_directory,"ModuleNetworks2"), # new folder name
+  n_inner = 10, # number of genes in inner ring
+  n_outer = 20, # number of genes in outer ring
+  n_conns = Inf, # show all of the connections
+  plot_size=c(12,12), # larger plotting area
+  vertex.label.cex=1.2, # font size
+  edge.alpha=0.2
+  #edge.width=0.5
+)
+```
+
+## 3. Co-expression module dynamics with pseudotime
+
+```{r, eval=FALSE}
+Acro_pseudotime_full_obj<-readRDS(file=paste0(input_directory,"LOAcro.merged.PCA.harmony_2024-11-03.rds"))
+Fem_pseudotime_full_obj<-readRDS(file=paste0(input_directory,"LOFem.merged.PCA.harmony_2024-11-03.rds"))
+
+Acro_pseudo_data<-data.frame(monocle3_pseudotime=Acro_pseudotime_full_obj$monocle3_pseudotime)
+Acro_pseudo_data$barcode<-rownames(Acro_pseudo_data)
+
+Fem_pseudo_data<-data.frame(monocle3_pseudotime=Fem_pseudotime_full_obj$monocle3_pseudotime)
+Fem_pseudo_data$barcode<-rownames(Fem_pseudo_data)
+
+#extracting spots that belong to the specific tissues used for the pseudotime analysis
+specific_organs_obj <- subset(x=sub_obj, subset = annot_cl == "11-Lateral Organs Differentiated" | annot_cl == "2-Lateral Organs Differentiated" | annot_cl == "5-Lateral Organs Primordia" | annot_cl == "8-Lateral Organs Primordia")
+
+#number of modules (gray comprised)
+nmodules=length(colnames(GetModules(sub_obj)))-3
+nmodules= 8
+#removing this info since it's going to be added also later (otherwise there are going to be some conflicts)
+specific_organs_obj@meta.data<-specific_organs_obj@meta.data[,1:(length(specific_organs_obj@meta.data)-nmodules)]
+ 
+#join the dataset with the Seurat metadata
+new_meta <- dplyr::left_join(specific_organs_obj@meta.data, Fem_pseudo_data, by='barcode')
+#tmp <- dplyr::left_join(specific_organs_obj@meta.data, Fem_pseudo_data, by='barcode')
+                                 
+#extracting information about which spots have been selected (in order to retrieve the information for the ME and hME values)
+specific_organs_obj@meta.data<-new_meta
+
+specific_organs_obj@misc$consensus$MEs<-specific_organs_obj@misc$consensus$MEs[which(!is.na(dplyr::left_join(sub_obj@meta.data, Fem_pseudo_data, by='barcode')[,length(sub_obj@meta.data)+1])),]
+
+specific_organs_obj@misc$consensus$hMEs<-specific_organs_obj@misc$consensus$hMEs[which(!is.na(dplyr::left_join(sub_obj@meta.data, Fem_pseudo_data, by='barcode')[,length(sub_obj@meta.data)+1])),]
+```
+
+We now use the hdWGCNA function PlotModuleTrajectory to visualize how the module eigengenes change throughout the pseudotime trajectories for each co-expression module. This function requires you to specify the name of the column in the Seurat object’s meta data where the pseudotime information is stored.
+```{r}
+
+# Make sure meta has a barcode column (create from rownames if missing)
+if (! "barcode" %in% colnames(specific_organs_obj@meta.data)) {
+  specific_organs_obj@meta.data$barcode <- rownames(specific_organs_obj@meta.data)
+}
+
+# Join and replace meta.data (safe join that preserves only matching barcodes)
+new_meta <- dplyr::left_join(
+  specific_organs_obj@meta.data %>% tibble::rownames_to_column(var = "orig_rowname"),
+  Acro_pseudo_data %>% dplyr::select(barcode, dplyr::everything()),
+  by = "barcode"
+)
+
+# Keep only rows that matched
+matched_rows <- which(!is.na(new_meta$barcode))
+if (length(matched_rows) == 0) stop("No barcodes matched between specific_organs_obj and pseudo_data")
+
+# Reconstruct meta.data and set rownames back to Seurat spot names (orig_rowname)
+new_meta2 <- new_meta[matched_rows, , drop = FALSE]
+rownames(new_meta2) <- new_meta2$orig_rowname
+new_meta2$orig_rowname <- NULL
+
+specific_organs_obj@meta.data <- new_meta2
+
+# Align MEs/hMEs to the same barcodes in specific_organs_obj
+MEs  <- specific_organs_obj@misc$consensus$MEs
+hMEs <- specific_organs_obj@misc$consensus$hMEs
+
+# get spot ids we want to keep (rownames of Seurat meta)
+target_cells <- rownames(specific_organs_obj@meta.data)
+
+# Case A:MEs/hMEs have rownames that are barcodes/spotnames -> match by name
+if (!is.null(rownames(MEs)) && all(rownames(MEs) %in% target_cells) ) {
+  common <- intersect(target_cells, rownames(MEs))
+  MEs  <- MEs[common, , drop = FALSE]
+  hMEs <- hMEs[common, , drop = FALSE]
+  specific_organs_obj@meta.data <- specific_organs_obj@meta.data[common, , drop = FALSE]
+
+} else if (!is.null(rownames(MEs)) && length(intersect(rownames(MEs), target_cells)) > 0) {
+  # Partial overlap: keep intersection, reorder to match Seurat
+  common <- intersect(target_cells, rownames(MEs))
+  MEs  <- MEs[common, , drop = FALSE]
+  hMEs <- hMEs[common, , drop = FALSE]
+  specific_organs_obj@meta.data <- specific_organs_obj@meta.data[common, , drop = FALSE]
+
+} else {
+  # Case B: MEs/hMEs do not have rownames or rownames are not barcodes
+  # Try to align using the order in pseudo_data
+  if ("barcode" %in% colnames(pseudo_data)) {
+    idx <- match(target_cells, pseudo_data$barcode)
+    keep <- which(!is.na(idx))
+    if (length(keep) == 0) stop("Can't align MEs: no overlap between Seurat meta barcodes and pseudo_data$barcode")
+    MEs  <- MEs[ idx[keep], , drop = FALSE ]
+    hMEs <- hMEs[ idx[keep], , drop = FALSE ]
+    specific_organs_obj@meta.data <- specific_organs_obj@meta.data[keep, , drop = FALSE]
+  } else {
+    stop("Unable to align MEs/hMEs to Seurat: MEs lack rownames and pseudo_data has no 'barcode' column.")
+  }
+}
+
+# 3) Final sanity checks
+if (nrow(MEs) != nrow(specific_organs_obj@meta.data)) {
+  stop(sprintf("Dimension mismatch after alignment: nrow(MEs) = %d, nrow(meta) = %d",
+               nrow(MEs), nrow(specific_organs_obj@meta.data)))
+}
+if (nrow(hMEs) != nrow(specific_organs_obj@meta.data)) {
+  stop(sprintf("Dimension mismatch after alignment: nrow(hMEs) = %d, nrow(meta) = %d",
+               nrow(hMEs), nrow(specific_organs_obj@meta.data)))
+}
+
+# Assign back
+specific_organs_obj@misc$consensus$MEs  <- MEs
+specific_organs_obj@misc$consensus$hMEs <- hMEs
+
+message("Alignment successful: ", nrow(MEs), " rows (spots) in meta, MEs and hMEs.")
+
+# 4) plot
+pseudo_plot  <- PlotModuleTrajectory(specific_organs_obj, pseudotime_col = 'monocle3_pseudotime',harmonized = TRUE, n_bins = 100, ncol = 4)
+
+pseudo_plot
+
+ggsave(pseudo_plot, filename = paste0(out_directory,out_prefix_name,".module_pseudotime_traj_Acro.jpeg"),dpi = 600, width = 20, height = 10)
+
+```
+
+Saving the final object:
+```{r}
+saveRDS(sub_obj,file=paste0(out_directory,out_prefix_name ,".hdWGCNA.anno.consensus.20251124.rds")) 
+#saveRDS(specific_organs_obj,file=paste0(out_directory,out_prefix_name ,".hdWGCNA.for_pseudotime.rds")) 
+```
+
+Info about the environment:
+```{r}
+sessionInfo()
+```
