@@ -1,0 +1,171 @@
+---
+title: "qPCR"
+author: "Sami Saarenpää"
+date: "2025-01-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#Yabby-A
+```{r YAB-A}
+# Load the required library
+library(ggplot2)
+
+# Create the dataset
+data <- data.frame(
+  group = c("April vegetative", "April female", "October vegetative", "September female"),
+  expression = c(2.67324, 0.6055, 1.56246, 1.45938),
+  err_min = c(2.44008, 0.55416, 1.34457, 1.26953),
+  err_max = c(2.92867, 0.66159, 1.81567, 1.67763)
+)
+
+# Create the barplot with error bars
+YabA <- ggplot(data, aes(x = group, y = expression)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "black") +
+  geom_errorbar(aes(ymin = err_min, ymax = err_max), width = 0.2) +
+  labs(
+    title = "Expression Levels of YABBY-A",
+    x = "Group",
+    y = "Expression Level"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+pdf(file = "/home/st-analysis_home/sami.saarenpaa/runs/Spruce/YABBYA_qPCR.pdf", width = 8, height = 6)
+YabA
+dev.off()
+
+```
+
+
+```{r pressure, echo=FALSE}
+# Data
+data <- data.frame(
+  group = rep(c("April vegetative", "April female", "October vegetative", "September female"), each = 3),
+  expression = c(2.22727, 2.93148, 2.92585,  # April vegetative
+                 0.56273, 0.54618, 0.72227,  # April female
+                 2.06966, 1.48787, 1.2387,  # October vegetative
+                 1.46967, 1.85117, 1.14247)  # September female
+)
+
+# Perform ANOVA
+anova_result <- aov(expression ~ group, data = data)
+summary(anova_result)
+
+# Perform pairwise t-tests
+pairwise_t <- pairwise.t.test(data$expression, data$group, p.adjust.method = "bonferroni")
+pairwise_t
+
+
+```
+
+#Yabby-B
+```{r YAB-B}
+# Load the required library
+library(ggplot2)
+
+# Create the dataset
+data <- data.frame(
+  group = c("April vegetative", "April female", "October vegetative", "September female"),
+  expression = c(3.4833, 0.22945, 0.40087, 0.04945),
+  err_min = c(2.54932, 0.15002, 0.37358, 0.04031),
+  err_max = c(4.75947, 0.35095, 0.43014, 0.06066)
+)
+
+
+# Create the barplot with error bars
+YabB <- ggplot(data, aes(x = group, y = expression)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "black") +
+  geom_errorbar(aes(ymin = err_min, ymax = err_max), width = 0.2) +
+  labs(
+    title = "Expression Levels of YABBY-B",
+    x = "Group",
+    y = "Expression Level"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+pdf(file = "/home/st-analysis_home/sami.saarenpaa/runs/Spruce/YABBYB_qPCR.pdf", width = 8, height = 6)
+YabB
+dev.off()
+```
+
+
+```{r pressure, echo=FALSE}
+# Data
+data <- data.frame(
+  group = rep(c("April vegetative", "April female", "October vegetative", "September female"), each = 3),
+  expression = c(3.3529, 6.09043, 2.06969,  # April vegetative
+                 0.13791, 0.16416, 0.5336,  # April female
+                 0.42684, 0.43336, 0.34825,  # October vegetative
+                 0.06457, 0.05658, 0.03309)  # September female
+)
+
+# Perform ANOVA
+anova_result <- aov(expression ~ group, data = data)
+summary(anova_result)
+
+# Perform pairwise t-tests
+pairwise_t <- pairwise.t.test(data$expression, data$group, p.adjust.method = "bonferroni")
+pairwise_t
+
+
+```
+
+#Yabby-C
+```{r YAB-B}
+# Load the required library
+library(ggplot2)
+
+# Create the dataset
+data <- data.frame(
+  group = c("April vegetative", "April female", "October vegetative", "September female"),
+  expression = c(2.7556, 1.06385, 1.56246, 0.92938),
+  err_min = c(2.16823, 0.98173, 1.38391, 0.88329),
+  err_max = c(3.50209, 1.15284, 1.76406, 0.97788)
+)
+
+# Create the barplot with error bars
+YabC <- ggplot(data, aes(x = group, y = expression)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "black") +
+  geom_errorbar(aes(ymin = err_min, ymax = err_max), width = 0.2) +
+  labs(
+    title = "Expression Levels of YABBY-C",
+    x = "Group",
+    y = "Expression Level"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+pdf(file = "/home/st-analysis_home/sami.saarenpaa/runs/Spruce/YABBYC_qPCR.pdf", width = 8, height = 6)
+YabC
+dev.off()
+
+```
+
+
+```{r pressure, echo=FALSE}
+# Data
+data <- data.frame(
+  group = rep(c("April vegetative", "April female", "October vegetative", "September female"), each = 3),
+  expression = c(3.0624, 3.91917, 1.74338,  # April vegetative
+                 1.09361, 1.20343, 0.91486,  # April female
+                 1.47273, 1.31257, 1.97326,  # October vegetative
+                 1.00741, 0.94195, 0.84596)  # September female
+)
+
+# Perform ANOVA
+anova_result <- aov(expression ~ group, data = data)
+summary(anova_result)
+
+# Perform pairwise t-tests
+pairwise_t <- pairwise.t.test(data$expression, data$group, p.adjust.method = "bonferroni")
+pairwise_t
+
+
+```
+
