@@ -100,3 +100,6 @@ docker run --rm -v /data:/data yuvaranimasarapu/r-env-spruce:st_pipeline1.7.9 \
 
 ## DAPseq data 
 To run the processing and analysis pipeline for the DAPseq experiments performed on the SPL1 TF in Norway spruce, go to GitHub repository [DAPseq_SPL1_spruce](https://github.com/TeiturAK/DAPseq_SPL1_spruce) where complete details to run the analyis as well as the required scripts are provided.
+
+## Shiny application for gene expression visualization
+The code and published docker image for designing the ShinyApp presented in this study is available on another GitHub repository of ours accessed via [https://github.com/giacomellolab/Norway_spruce_ShinyApp](https://github.com/giacomellolab/Norway_spruce_ShinyApp). The ShinyApp itself can be accessed via the link [https://norwayspruceshiny.serve.scilifelab.se/](https://norwayspruceshiny.serve.scilifelab.se/).
