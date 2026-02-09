@@ -1,0 +1,81 @@
+---
+title: "DEA analysis for PaSPL1 expression in lateral organs (Table 3 in manuscript)"
+author: "Yuvarani Masarapu"
+date: "2023-05-22"
+output: html_document
+---
+
+# Packages
+```{r libraries-load, echo=FALSE}
+suppressPackageStartupMessages({
+  library(STutility)
+  library(Seurat)
+  library(harmony)
+  library(gridExtra)
+  library(pals)
+  library(akima)
+  library(readr)
+  library(plotly)
+  library(tibble)
+  library(raster)
+  library(dplyr)
+  library(stringr)
+  library(magrittr)
+  library(ggplot2)
+  library(imager)
+  library(Matrix)
+  library(cowplot)
+  require(data.table)
+  library(magick)
+  library(grid)
+  library(SeuratObject)
+  library(tidyverse)
+  library(rstatix)
+  library(ggpubr)
+})
+```
+
+# Load the clustering seurat object with all buds and genes
+```{r}
+spruce.notrash <- readRDS("<load_the_spruce_clustering_rds_object_without_artefact_clusters")
+```
+
+# Read the SPL genes list and subset the seurat object for these genes
+
+First, we identify the spots where the PaSPL1 genes MA-22749g0010 and MA-15381g0010 are expressed.
+The for the analysis we only consider these spots.
+
+Then from this subset, we only consider the lateral organs clusters.
+
+```{r}
+spl.genes <- c("MA-22749g0010",
+               "MA-15381g0010")
+
+#Identify the spots where the two genes above are expressed
+temp <- SubsetSTData(object = spruce.notrash, features = spl.genes)
+temp <- temp[, colSums(temp) >0]
+spl.spots <- colnames(temp)
+
+#subset the clustering object for these spots
+spl.subset <- SubsetSTData(object = spruce.notrash, spots = spl.spots)
+rm(temp)
+rm(spruce.notrash)
+
+getwd()
+```
+
+
+```{r}
+#subset again the object for only the laternal organ clusters
+spl.lateral.spots <- colnames(spl.subset)[spl.subset$cl_names %in% c("3_Lateral Organs Differentiated", "4_Lateral Organs Primordia")]
+spl.subset.lateral <- SubsetSTData(object = spl.subset, spots = spl.lateral.spots)
+```
+
+## DEG analysis of PaSPL1 expressing lateral organ spots comparing acrocona transition shoot and seed cone primordia with vegetative shoot primordia (as seen in Table 3 of the manuscript)
+
+```{r}
+veg.spl.lateral <- FindMarkers(object = spl.subset.lateral, assay = "SCT", ident.1 = c("Acro", "Fem"), only.pos = F, test.use = "bimod", ident.2 = c("Veg"),  group.by = "stage", random.seed = 86, recorrect_umi = FALSE, logfc.threshold = 0.25, min.pct = 0.1)
+veg.spl.lateral <- veg.spl.lateral[order(veg.spl.lateral$avg_log2FC, decreasing = TRUE), ]
+
+write.csv(veg.spl.lateral, row.names = T, col.names = T, file = paste(outdir, "/acrofem-vs-veg_SPL1_lateral-spots.csv", sep = ""))
+```
