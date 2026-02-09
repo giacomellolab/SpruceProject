@@ -37,8 +37,6 @@ The 16 clusters mentioned in the manuscript are identified through the clusterin
 In order to run the Rscripts for this analysis, we need to use the docker container which encloses it's R environment. Type the following in your terminal (within R console or terminal app) to run the docker container.
 The count matrices and corresponding brightfield images needed as input for these scripts are accessed from our Data Mendeley repository with currently reserved [DOI:10.17632/b7fppw63v8.1](https://data.mendeley.com/preview/b7fppw63v8?a=0a093701-dffc-4dd8-bdab-bb372579088) that will be made public upon publication. Each file/object is clearly described in the description part of this repository for easier understanding.
 
-The same docker container can also be used for the PaSPL1 DEA analysis which uses the same packages and package versions. The scripts for this analysis are in place [here](scripts/PaSPL1_DEA-analysis).
-
 ```bash
 docker run --rm -v $(pwd):/SpruceProject -w /SpruceProject yuvaranimasarapu/r-env-spruce:clusteringv1.0 \
   R -e "rmarkdown::render('scripts/clustering_and_BvS-analysis/1_LoadData_Filtering.Rmd', output_dir = 'results')" && \
@@ -57,6 +55,8 @@ Each markdown script depends on the results from the previous one — for exampl
 - 4_Visualisation_Plots.Rmd creates plots that were used to visualize the clustering results.
 - 5_MarkerGene_analysis.Rmd extracts the cluster markers and performs the DE analysis.
 - 6_bracts_vs_scales.Rmd extracts the DE genes from the bracts and scales comparisons.
+
+The same docker container can also be used for the PaSPL1 DEA analysis which uses the same packages and package versions. The scripts for this analysis are in place [here](scripts/PaSPL1_DEA-analysis).
 
 ## STdeconvolve
 In order to run the Rscripts for this analysis via its docker container, type the following in your terminal (within R console or terminal app).
